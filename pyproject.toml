@@ -1,0 +1,58 @@
+[project]
+name = "butler"
+version = "0.1.0"
+description = "Discord bot for creating same-day events with RSVP interactions"
+authors = [{ name = "Jonathan Skårstedt" }]
+requires-python = ">=3.11,<4.0"
+dependencies = [
+    "discord.py>=2.4.0,<3.0.0",
+    "tomli>=2.0.1,<3.0.0; python_version < '3.11'",
+]
+[project.scripts]
+butler = "butler.app:main"
+butler-dev = "butler.app:main_dev"
+
+[build-system]
+requires = ["poetry-core>=1.8.0"]
+build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "ruff (>=0.15.17,<0.16.0)",
+    "mypy (>=2.1.0,<3.0.0)"
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+exclude = [".venv"]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "W",
+    "I",
+    "UP",
+    "B",
+    "C4",
+    "SIM",
+    "RET",
+    "RUF",
+    "C90",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["butler"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+show_error_codes = true
+pretty = true
+files = ["butler", "bot.py"]
+exclude = ["^\\.venv/"]

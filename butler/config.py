@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import tomllib
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,53 +12,54 @@ class DiscordConfig:
 
 
 def load_config(config_path: Path) -> DiscordConfig:
-    if not config_path.exists():
-        raise RuntimeError(
-            f"{config_path.name} not found. Copy config.toml.example to "
-            "config.toml and set your token."
-        )
-
-    try:
-        raw_config = config_path.read_text(encoding="utf-8")
-        parsed_config = tomllib.loads(raw_config)
-    except tomllib.TOMLDecodeError as exc:
-        raise RuntimeError(f"Invalid TOML in {config_path.name}: {exc}") from exc
-
-    return parse_config(parsed_config)
-
-
-def parse_config(config_data: object) -> DiscordConfig:
-    if not isinstance(config_data, dict):
-        raise RuntimeError("Invalid config format. Expected a top-level TOML table.")
-
-    discord_config = config_data.get("discord")
-    if not isinstance(discord_config, dict):
-        raise RuntimeError("Missing [discord] section in config.toml.")
-
-    token = _parse_token(discord_config.get("token"))
-    guild_id = _parse_guild_id(discord_config.get("guild_id"))
+    _load_env_file(config_path)
+    token = _parse_token(os.getenv("DISCORD_TOKEN"))
+    guild_id = _parse_guild_id(os.getenv("DISCORD_GUILD_ID"))
     return DiscordConfig(token=token, guild_id=guild_id)
 
 
-def _parse_token(raw_token: object) -> str:
-    if not isinstance(raw_token, str):
-        raise RuntimeError("Set [discord].token in config.toml to your real bot token.")
+def _load_env_file(config_path: Path) -> None:
+    if not config_path.exists():
+        return
+    raw_lines = config_path.read_text(encoding="utf-8").splitlines()
+    for raw_line in raw_lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].strip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        normalized_key = key.strip()
+        if not normalized_key:
+            continue
+        normalized_value = value.strip()
+        if (
+            len(normalized_value) >= 2
+            and normalized_value[0] == normalized_value[-1]
+            and normalized_value[0] in {'"', "'"}
+        ):
+            normalized_value = normalized_value[1:-1]
+        os.environ.setdefault(normalized_key, normalized_value)
+
+
+def _parse_token(raw_token: str | None) -> str:
+    if raw_token is None:
+        raise RuntimeError("Set DISCORD_TOKEN in .env or the process environment.")
     normalized_token = raw_token.strip()
     if not normalized_token or normalized_token == "your_discord_bot_token_here":
-        raise RuntimeError("Set [discord].token in config.toml to your real bot token.")
+        raise RuntimeError("Set DISCORD_TOKEN in .env or the process environment.")
     return normalized_token
 
 
-def _parse_guild_id(raw_guild_id: object) -> int | None:
-    if raw_guild_id in (None, ""):
+def _parse_guild_id(raw_guild_id: str | None) -> int | None:
+    if raw_guild_id is None:
         return None
-    if isinstance(raw_guild_id, bool):
-        raise RuntimeError("[discord].guild_id must be an integer or omitted.")
-    if isinstance(raw_guild_id, int):
-        return raw_guild_id
-    if not isinstance(raw_guild_id, str):
-        raise RuntimeError("[discord].guild_id must be an integer or omitted.")
+    normalized = raw_guild_id.strip()
+    if not normalized:
+        return None
     try:
-        return int(raw_guild_id)
+        return int(normalized)
     except (TypeError, ValueError) as exc:
-        raise RuntimeError("[discord].guild_id must be an integer or omitted.") from exc
+        raise RuntimeError("DISCORD_GUILD_ID must be an integer when set.") from exc

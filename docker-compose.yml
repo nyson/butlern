@@ -1,0 +1,14 @@
+services:
+  butler:
+    build: .
+    container_name: butler
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      BUTLER_DB_PATH: /data/butler_state.db
+    volumes:
+      - butler_data:/data
+
+volumes:
+  butler_data:

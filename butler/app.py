@@ -129,17 +129,17 @@ def _event_management_permission_denied_message(
     if event_manager_role_id is None:
         return (
             "Du behöver behörigheten `Hantera server` för att skapa event "
-            "och öppna rum."
+            "och öppna eller stänga rum."
         )
     role = guild.get_role(event_manager_role_id)
     if role is None:
         return (
             "Du behöver behörigheten `Hantera server` eller den konfigurerade "
-            "Butler-rollen för att skapa event och öppna rum."
+            "Butler-rollen för att skapa event och öppna eller stänga rum."
         )
     return (
         "Du behöver behörigheten `Hantera server` eller rollen "
-        f"{role.mention} för att skapa event och öppna rum."
+        f"{role.mention} för att skapa event och öppna eller stänga rum."
     )
 
 
@@ -232,6 +232,45 @@ def _missing_permission_details(
         )
     return details
 
+async def _defer_thinking_response(interaction: discord.Interaction) -> bool:
+    try:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        return True
+    except discord.InteractionResponded:
+        return True
+    except discord.NotFound as exc:
+        if exc.code != 10062:
+            raise
+        return False
+    except discord.HTTPException:
+        return False
+
+async def _ensure_event_creation_permissions(
+    *,
+    interaction: discord.Interaction,
+    guild: discord.Guild,
+    event_channel: discord.TextChannel,
+) -> bool:
+    bot_member = get_bot_member(guild, bot.user)
+    if bot_member is None:
+        await interaction.followup.send(
+            "I couldn't verify my server permissions. Re-invite the bot and try again.",
+            ephemeral=True,
+        )
+        return False
+    permission_errors = _missing_permission_details(
+        bot_member=bot_member,
+        event_channel=event_channel,
+    )
+    if permission_errors:
+        await interaction.followup.send(
+            "I don't have the required permissions to create and post this event.\n"
+            + "\n".join(permission_errors),
+            ephemeral=True,
+        )
+        return False
+    return True
+
 
 async def _sync_to_guild(guild_id: int, *, strict: bool) -> None:
     guild = discord.Object(id=guild_id)
@@ -254,7 +293,7 @@ async def _sync_commands_on_startup() -> None:
     if FORCE_GUILD_SYNC:
         if DEV_GUILD_ID is None:
             raise RuntimeError(
-                "butler-dev requires [discord].guild_id in config.toml for guild-only sync."
+                "butler-dev requires DISCORD_GUILD_ID in .env or the environment."
             )
         await _sync_to_guild(DEV_GUILD_ID, strict=True)
         print("Forced dev mode command sync is active.")
@@ -262,7 +301,6 @@ async def _sync_commands_on_startup() -> None:
 
     if DEV_GUILD_ID is not None:
         await _sync_to_guild(DEV_GUILD_ID, strict=False)
-        return
 
     await bot.tree.sync()
     print("Synced global commands.")
@@ -484,13 +522,13 @@ async def seteventchannel(
     )
 @bot.tree.command(
     name="seteventrole",
-    description="Set role allowed to create events and open rooms",
+    description="Set role allowed to create events and open/close rooms",
 )
 @app_commands.guild_only()
 @app_commands.default_permissions(manage_guild=True)
 @app_commands.describe(
     role=(
-        "Role allowed to create events and open rooms. "
+        "Role allowed to create events and open/close rooms. "
         "Leave empty to clear."
     )
 )
@@ -528,14 +566,14 @@ async def seteventrole(
     if role is None:
         await interaction.response.send_message(
             "Cleared the event manager role. Only users with "
-            "`Hantera server` can now create events and open rooms.",
+            "`Hantera server` can now create events and open/close rooms.",
             ephemeral=True,
         )
         return
 
     await interaction.response.send_message(
         (
-            f"Members with {role.mention} can now create events and open rooms "
+            f"Members with {role.mention} can now create events and open/close rooms "
             "(in addition to `Hantera server`)."
         ),
         ephemeral=True,
@@ -591,7 +629,9 @@ async def event(
         )
         return
 
-    await interaction.response.defer(ephemeral=True, thinking=True)
+    deferred = await _defer_thinking_response(interaction)
+    if not deferred:
+        return
 
     event_channel = _resolve_configured_event_channel(guild)
     if event_channel is None:
@@ -615,24 +655,12 @@ async def event(
         await interaction.followup.send(str(exc), ephemeral=True)
         return
 
-    bot_member = get_bot_member(guild, bot.user)
-    if bot_member is None:
-        await interaction.followup.send(
-            "I couldn't verify my server permissions. Re-invite the bot and try again.",
-            ephemeral=True,
-        )
-        return
-
-    permission_errors = _missing_permission_details(
-        bot_member=bot_member,
+    can_create_event = await _ensure_event_creation_permissions(
+        interaction=interaction,
+        guild=guild,
         event_channel=event_channel,
     )
-    if permission_errors:
-        await interaction.followup.send(
-            "I don't have the required permissions to create and post this event.\n"
-            + "\n".join(permission_errors),
-            ephemeral=True,
-        )
+    if not can_create_event:
         return
 
     event = await _create_scheduled_event(
@@ -709,7 +737,9 @@ async def previeweventdesign(
         )
         return
 
-    await interaction.response.defer(ephemeral=True, thinking=True)
+    deferred = await _defer_thinking_response(interaction)
+    if not deferred:
+        return
 
     event_channel = _resolve_configured_event_channel(guild)
     if event_channel is None:
@@ -796,7 +826,7 @@ def main(*, force_guild_sync: bool = False) -> None:
     global FORCE_GUILD_SYNC
     FORCE_GUILD_SYNC = force_guild_sync
     if not TOKEN:
-        raise RuntimeError("Missing Discord token in config.toml.")
+        raise RuntimeError("Missing DISCORD_TOKEN in .env or the environment.")
     bot.run(TOKEN)
 
 

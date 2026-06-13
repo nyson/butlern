@@ -1,8 +1,10 @@
-.venv/
+.git
+.venv
 __pycache__/
 *.pyc
+.mypy_cache/
+.ruff_cache/
 .env
-config.toml
 butler_state.db
 *.db-shm
 *.db-wal

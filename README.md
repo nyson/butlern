@@ -6,10 +6,10 @@ Discord bot that creates same-day scheduled events and posts an interactive RSVP
 
 1. Install dependencies:
    - `poetry install`
-2. Create `config.toml` from `config.toml.example`.
+2. Create `.env` from `.env.example`.
 3. Set:
-   - `[discord].token` to your bot token
-   - `[discord].guild_id` to your test server ID (required for `butler-dev`)
+   - `DISCORD_TOKEN` to your bot token
+   - `DISCORD_GUILD_ID` to your test server ID (required for `butler-dev`)
 
 ## Required Discord OAuth Scopes
 
@@ -28,7 +28,7 @@ Grant these permissions to the bot role in the server:
 - `Send Messages`
 - `Embed Links`
 
-For `butler-dev`, these are required in the specific guild from `guild_id` because command sync is guild-scoped and strict.
+For `butler-dev`, these are required in the specific guild from `DISCORD_GUILD_ID` because command sync is guild-scoped and strict.
 
 ## Required Intents
 
@@ -46,6 +46,23 @@ In Discord Developer Portal → **Bot**:
 - Dev mode (strict guild sync):
   - `poetry run butler-dev`
 
+State (default event channel + event manager role) is stored in `butler_state.db`
+(SQLite). Override the location with `BUTLER_DB_PATH`.
+
+## Run with Docker
+
+Build and run with Docker Compose:
+
+- `docker compose up --build -d`
+
+Compose reads bot credentials from `.env` and persists SQLite state in the named
+volume `butler_data`.
+
+Run without Compose:
+
+- `docker build -t butler .`
+- `docker run --rm --name butler --env-file .env -e BUTLER_DB_PATH=/data/butler_state.db -v butler_data:/data butler`
+
 ## Onboarding and default event channel
 
 When Butler joins a server, it posts a short onboarding message asking you to configure the event channel.
@@ -62,7 +79,7 @@ Notes:
 
 ## Slash command usage
 
-Use `/eventtoday` to create the scheduled event and post RSVP in the configured default event channel.
+Use `/event` to create the scheduled event and post RSVP in the configured default event channel.
 
 Arguments:
 
@@ -78,14 +95,17 @@ Behavior:
 - planned events do not require room details up front
 - `location` and `duration` are internal defaults and not user inputs
 - the RSVP post always includes an **Open Event** link
-- an **Open Room** link is included only when `room_link` is provided
+- room status starts as waiting for a link, can be opened/reopened with `Lägg till rumslänk`, and can be closed with `Stäng rummet`
 
 ## RSVP interactions
 
 - Buttons:
   - `Available`
   - `Maybe`
-  - `Arrive later` (prompts for arrival time in `HH:MM`)
+  - `Kommer senare`
+  - `Jag vill storytella!`
+  - `Lägg till rumslänk` (opens or reopens the room)
+  - `Stäng rummet` (closes room and shows `Rummet är nu stängt! Tack för ikväll!`)
 - Emoji reactions are also supported:
   - `✅` → Available
   - `🤔` → Maybe
@@ -104,13 +124,13 @@ This usually means one of these:
 
 ### Token errors (`401 Unauthorized` / `Improper token` / login failure)
 
-- Token in `config.toml` is invalid, expired, or from a different app
-- You regenerated the token but didn’t update `config.toml`
+- `DISCORD_TOKEN` in `.env` is invalid, expired, or from a different app
+- You regenerated the token but didn’t update `.env`
 
 Fix:
 
 1. Discord Developer Portal → **Bot** → **Reset Token**
-2. Paste new token into `config.toml`
+2. Paste new token into `.env`
 3. Restart bot
 
 If a token was exposed accidentally, reset it immediately.

@@ -15,10 +15,14 @@ AVAILABLE_BUTTON_LABEL: Final[str] = "Jag vill vara med!"
 MAYBE_BUTTON_LABEL: Final[str] = "Kanske"
 ARRIVE_LATER_BUTTON_LABEL: Final[str] = "Kommer senare"
 STORYTELLER_BUTTON_LABEL: Final[str] = "Jag vill storytella!"
-ROOM_LINK_PROMPT_BUTTON_LABEL: Final[str] = "Lägg till rumslänk"
+ROOM_MANAGEMENT_BUTTON_LABEL: Final[str] = "Rumshantering"
+ROOM_MANAGEMENT_BUTTON_EMOJI: Final[str] = "🛠️"
+ROOM_LINK_PROMPT_BUTTON_LABEL: Final[str] = "Öppna rummet"
 ROOM_LINK_PROMPT_BUTTON_EMOJI: Final[str] = "🔗"
+ROOM_CLOSE_BUTTON_LABEL: Final[str] = "Stäng rummet"
+ROOM_CLOSE_BUTTON_EMOJI: Final[str] = "🔒"
 ROOM_LINK_PERMISSION_DENIED_MESSAGE: Final[str] = (
-    "Du behöver behörigheten `Hantera server` eller Butler-rollen för att öppna rum."
+    "Du behöver storyteller-rollen för att öppna eller stänga rum."
 )
 
 RSVP_STATUS_EMOJIS: Final[tuple[RsvpStatusEmoji, ...]] = (
@@ -64,6 +68,8 @@ EVENT_POST_TEMPLATE: Final[str] = (
     "{status_sections}\n\n"
     "{footer_text}"
 )
+ROOM_PENDING_MESSAGE: Final[str] = "🚪 **RUMMET ÖPPNAS NÄR LÄNKEN ÄR KLAR**"
+ROOM_CLOSED_MESSAGE: Final[str] = "Rummet är nu stängt! Tack för ikväll!"
 
 ROOM_LINK_MODAL_TITLE: Final[str] = "Lägg till rumslänk"
 ROOM_LINK_MODAL_LABEL: Final[str] = "Rumslänk (http/https)"

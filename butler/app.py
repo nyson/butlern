@@ -38,14 +38,14 @@ from butler.permissions import (
     get_missing_post_permissions,
     guild_sync_access_message,
 )
-from butler.rsvp_domain import RsvpStatus
-from butler.rsvp_view import AvailabilityView
+from butler.rsvp.rsvp_domain import RsvpStatus
+from butler.rsvp.rsvp_view import AvailabilityView
 from butler.settings_store import GuildSettingsStore
 
 CONFIG = load_config(CONFIG_PATH)
 TOKEN: Final[str] = CONFIG.token
 DEV_GUILD_ID: Final[int | None] = CONFIG.guild_id
-FORCE_GUILD_SYNC = False
+_force_guild_sync = False
 SETTINGS_STORE = GuildSettingsStore.load(SETTINGS_PATH)
 ACTIVE_RSVP_VIEWS: dict[int, AvailabilityView] = {}
 BOTC_EDITIONS: Final[tuple[str, ...]] = (
@@ -101,9 +101,9 @@ def _resolve_edition_media(
     return str(emoji), str(emoji.url)
 
 
-def _build_user_mentions(user_ids: list[int]) -> str:
-    unique_user_ids = sorted(set(user_ids))
-    return " ".join(f"<@{user_id}>" for user_id in unique_user_ids)
+# def _build_user_mentions(user_ids: list[int]) -> str:
+#     unique_user_ids = sorted(set(user_ids))
+#     return " ".join(f"<@{user_id}>" for user_id in unique_user_ids)
 
 def _configured_event_manager_role_id(guild_id: int) -> int | None:
     return SETTINGS_STORE.get_event_manager_role_id(guild_id)
@@ -128,14 +128,14 @@ def _event_management_permission_denied_message(
 ) -> str:
     if event_manager_role_id is None:
         return (
-            "Du behöver behörigheten `Hantera server` för att skapa event "
-            "och öppna eller stänga rum."
+            "Du behöver behörigheten `Hantera server` eller den konfigurerade "
+            "storyteller-rollen för att skapa event och öppna eller stänga rum."
         )
     role = guild.get_role(event_manager_role_id)
     if role is None:
         return (
             "Du behöver behörigheten `Hantera server` eller den konfigurerade "
-            "Butler-rollen för att skapa event och öppna eller stänga rum."
+            "storyteller-rollen för att skapa event och öppna eller stänga rum."
         )
     return (
         "Du behöver behörigheten `Hantera server` eller rollen "
@@ -290,7 +290,7 @@ async def _sync_to_guild(guild_id: int, *, strict: bool) -> None:
 
 
 async def _sync_commands_on_startup() -> None:
-    if FORCE_GUILD_SYNC:
+    if _force_guild_sync:
         if DEV_GUILD_ID is None:
             raise RuntimeError(
                 "butler-dev requires DISCORD_GUILD_ID in .env or the environment."
@@ -453,7 +453,7 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent) -> Non
 
 @bot.event
 async def setup_hook() -> None:
-    if not FORCE_GUILD_SYNC:
+    if not _force_guild_sync:
         bot.tree.remove_command(
             "previeweventdesign",
             type=discord.AppCommandType.chat_input,
@@ -823,8 +823,8 @@ async def previeweventdesign(
 
 
 def main(*, force_guild_sync: bool = False) -> None:
-    global FORCE_GUILD_SYNC
-    FORCE_GUILD_SYNC = force_guild_sync
+    global _force_guild_sync
+    _force_guild_sync = force_guild_sync
     if not TOKEN:
         raise RuntimeError("Missing DISCORD_TOKEN in .env or the environment.")
     bot.run(TOKEN)

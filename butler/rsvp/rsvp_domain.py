@@ -28,7 +28,7 @@ def status_count(responses: dict[int, RsvpResponse], status: RsvpStatus) -> int:
     return sum(1 for response in responses.values() if response.status == status)
 
 
-def mentions_for_status(responses: dict[int, RsvpResponse], status: RsvpStatus) -> str:
+def mentions_for_status(responses: dict[int, RsvpResponse], status: RsvpStatus) -> str | None:
     mentions: list[str] = []
     for user_id, response in responses.items():
         if response.status != status:
@@ -39,7 +39,7 @@ def mentions_for_status(responses: dict[int, RsvpResponse], status: RsvpStatus) 
             mentions.append(f"<@{user_id}>")
 
     if not mentions:
-        return "—"
+        return None
 
     preview = ", ".join(mentions[:15])
     if len(mentions) > 15:

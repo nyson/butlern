@@ -20,11 +20,12 @@ from butler.design import (
     ROOM_LINK_MODAL_PLACEHOLDER,
     ROOM_LINK_MODAL_TITLE,
     ROOM_LINK_PERMISSION_DENIED_MESSAGE,
+    ROOM_LINK_PERMISSION_DENIED_ROLE_TEMPLATE,
     ROOM_LINK_PROMPT_BUTTON_EMOJI,
     ROOM_LINK_PROMPT_BUTTON_LABEL,
+    ROOM_OPENED_MESSAGE_TEMPLATE,
     ROOM_OPENED_NO_MENTIONS_TEMPLATE,
     ROOM_OPENED_WITH_MENTIONS_TEMPLATE,
-    ROOM_PENDING_MESSAGE,
     RSVP_FOOTER_TEXT,
     RSVP_STATUS_EMOJIS,
     RSVP_STATUS_LABELS,
@@ -32,7 +33,7 @@ from butler.design import (
     STORYTELLER_EMOJI,
 )
 from butler.event_logic import normalize_room_url
-from butler.rsvp_domain import (
+from butler.rsvp.rsvp_domain import (
     RsvpResponse,
     RsvpStatus,
     mentions_for_status,
@@ -60,22 +61,17 @@ def _can_manage_room_action(
         return False
     return any(role.id == event_manager_role_id for role in interaction.user.roles)
 
-
 def _room_permission_denied_message(
     interaction: discord.Interaction,
     *,
     event_manager_role_id: int | None,
 ) -> str:
-    if event_manager_role_id is None:
-        return ROOM_LINK_PERMISSION_DENIED_MESSAGE
     guild = interaction.guild
-    if guild is None:
-        return ROOM_LINK_PERMISSION_DENIED_MESSAGE
-    role = guild.get_role(event_manager_role_id)
-    if role is None:
-        return ROOM_LINK_PERMISSION_DENIED_MESSAGE
-    return f"Du behöver storyteller-rollen {role.mention} för att öppna eller stänga rum."
-
+    role_id = event_manager_role_id
+    role = guild and role_id and guild.get_role(role_id) or None
+    if role:
+        return ROOM_LINK_PERMISSION_DENIED_ROLE_TEMPLATE.format(mention=role.mention)
+    return ROOM_LINK_PERMISSION_DENIED_MESSAGE
 
 async def _announce_room_opening(
     *,
@@ -170,13 +166,15 @@ class AvailabilityView(discord.ui.View):
             visible=self.room_state == "open",
         )
 
-    def _build_room_section(self) -> str:
-        room_line = ROOM_PENDING_MESSAGE
+    def _build_room_section(self) -> str | None:
         if self.room_state == "open" and self.room_url is not None:
-            room_line = f"**Rummet är öppet:** {self.room_url}"
+            return (
+                f"{ROOM_OPENED_MESSAGE_TEMPLATE.format(room_url=self.room_url)}"
+                "\n\n"
+            )
         elif self.room_state == "closed":
-            room_line = ROOM_CLOSED_MESSAGE
-        return f"{room_line}\nAnvänd knapparna nedan för att svara.\n\n"
+            return f"{ROOM_CLOSED_MESSAGE}\n\n"
+        return None
 
     def _build_title_line(self) -> str:
         if self.edition_emoji is None:
@@ -209,7 +207,7 @@ class AvailabilityView(discord.ui.View):
         for status, emoji in self.STATUSES:
             count = status_count(self.responses, status)
             display_label = RSVP_STATUS_LABELS[status]
-            mentions = mentions_for_status(self.responses, status)
+            mentions = mentions_for_status(self.responses, status) or ""
             sections.append(f"{emoji} **{display_label} ({count})**\n{mentions}")
         return "\n\n".join(sections)
 
@@ -218,7 +216,7 @@ class AvailabilityView(discord.ui.View):
         return EVENT_POST_TEMPLATE.format(
             title_line=title_line,
             event_description=self.event_description,
-            room_section=self._build_room_section(),
+            room_section=self._build_room_section() or "\n",
             status_sections=self._build_status_sections(),
             footer_text=RSVP_FOOTER_TEXT,
         )
@@ -226,7 +224,7 @@ class AvailabilityView(discord.ui.View):
     def build_embed(self) -> discord.Embed | None:
         return None
 
-    def _open_room_permission_denied_message(
+    def open_room_permission_denied_message(
         self,
         interaction: discord.Interaction,
     ) -> str:
@@ -378,7 +376,7 @@ class AvailabilityView(discord.ui.View):
             event_manager_role_id=self.event_manager_role_id,
         ):
             await interaction.response.send_message(
-                self._open_room_permission_denied_message(interaction),
+                self.open_room_permission_denied_message(interaction),
                 ephemeral=True,
             )
             return
@@ -400,7 +398,7 @@ class AvailabilityView(discord.ui.View):
             event_manager_role_id=self.event_manager_role_id,
         ):
             await interaction.response.send_message(
-                self._open_room_permission_denied_message(interaction),
+                self.open_room_permission_denied_message(interaction),
                 ephemeral=True,
             )
             return
@@ -464,12 +462,13 @@ class RoomManagementView(discord.ui.View):
         return f"`Hantera server` eller <@&{self.event_manager_role_id}>"
 
     def build_content(self) -> str:
-        room_line = ROOM_PENDING_MESSAGE
+        room_line = ""
         if (
             self.availability_view.room_state == "open"
             and self.availability_view.room_url is not None
         ):
-            room_line = f"**Rummet är öppet:** {self.availability_view.room_url}"
+            room_line = ROOM_OPENED_MESSAGE_TEMPLATE.format(
+                room_url=self.availability_view.room_url)
         elif self.availability_view.room_state == "closed":
             room_line = ROOM_CLOSED_MESSAGE
         return (
@@ -478,7 +477,7 @@ class RoomManagementView(discord.ui.View):
             f"{room_line}"
         )
 
-    def _permission_denied_message(self, interaction: discord.Interaction) -> str:
+    def permission_denied_message(self, interaction: discord.Interaction) -> str:
         return _room_permission_denied_message(
             interaction,
             event_manager_role_id=self.event_manager_role_id,
@@ -538,7 +537,7 @@ class RoomManagementView(discord.ui.View):
             event_manager_role_id=self.event_manager_role_id,
         ):
             await interaction.response.send_message(
-                self._permission_denied_message(interaction),
+                self.permission_denied_message(interaction),
                 ephemeral=True,
             )
             return
@@ -560,7 +559,7 @@ class RoomManagementView(discord.ui.View):
             event_manager_role_id=self.event_manager_role_id,
         ):
             await interaction.response.send_message(
-                self._permission_denied_message(interaction),
+                self.permission_denied_message(interaction),
                 ephemeral=True,
             )
             return
@@ -586,7 +585,7 @@ class RoomManagementRoomLinkModal(discord.ui.Modal, title=ROOM_LINK_MODAL_TITLE)
             event_manager_role_id=self.management_view.event_manager_role_id,
         ):
             await interaction.response.send_message(
-                self.management_view._permission_denied_message(interaction),
+                self.management_view.permission_denied_message(interaction),
                 ephemeral=True,
             )
             return
@@ -631,7 +630,7 @@ class RoomLinkModal(discord.ui.Modal, title=ROOM_LINK_MODAL_TITLE):
             event_manager_role_id=self.view.event_manager_role_id,
         ):
             await interaction.response.send_message(
-                self.view._open_room_permission_denied_message(interaction),
+                self.view.open_room_permission_denied_message(interaction),
                 ephemeral=True,
             )
             return

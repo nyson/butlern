@@ -5,5 +5,7 @@
         "rumslänk",
         "seteventchannel",
         "storytella"
-    ]
+    ],
+    "python.analysis.typeCheckingMode": "strict",
+    "python.analysis.autoImportCompletions": true
 }

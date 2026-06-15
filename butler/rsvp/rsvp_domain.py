@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Final, Literal
 
 RsvpStatus = Literal["Available", "Maybe", "Later", "Storyteller"]
+RoomState = Literal["pending", "open", "closed"]
 
 # Order in which reaction-derived statuses win when a user holds several reactions
 # at once: Maybe > Later > Storyteller > Available.

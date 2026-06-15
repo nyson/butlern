@@ -33,6 +33,7 @@ from butler.design import (
     STORYTELLER_EMOJI,
 )
 from butler.event_logic import normalize_room_url
+from butler.permissions import member_can_manage_events, permission_denied_message
 from butler.rsvp.rsvp_domain import (
     RsvpResponse,
     RsvpStatus,
@@ -53,13 +54,10 @@ def _can_manage_room_action(
     *,
     event_manager_role_id: int | None,
 ) -> bool:
-    if not isinstance(interaction.user, discord.Member):
+    user = interaction.user
+    if not isinstance(user, discord.Member):
         return False
-    if interaction.user.guild_permissions.manage_guild:
-        return True
-    if event_manager_role_id is None:
-        return False
-    return any(role.id == event_manager_role_id for role in interaction.user.roles)
+    return member_can_manage_events(user, event_manager_role_id=event_manager_role_id)
 
 def _room_permission_denied_message(
     interaction: discord.Interaction,
@@ -67,11 +65,16 @@ def _room_permission_denied_message(
     event_manager_role_id: int | None,
 ) -> str:
     guild = interaction.guild
-    role_id = event_manager_role_id
-    role = (guild and role_id and guild.get_role(role_id)) or None
-    if role:
-        return ROOM_LINK_PERMISSION_DENIED_ROLE_TEMPLATE.format(mention=role.mention)
-    return ROOM_LINK_PERMISSION_DENIED_MESSAGE
+    role = (
+        guild.get_role(event_manager_role_id)
+        if guild is not None and event_manager_role_id is not None
+        else None
+    )
+    return permission_denied_message(
+        role_mention=role.mention if role is not None else None,
+        without_role=ROOM_LINK_PERMISSION_DENIED_MESSAGE,
+        with_role_template=ROOM_LINK_PERMISSION_DENIED_ROLE_TEMPLATE,
+    )
 
 async def _announce_room_opening(
     *,

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from tests.fakes import (
@@ -10,6 +12,11 @@ from tests.fakes import (
     FakeMember,
     FakePermissions,
 )
+
+# `butler.app` loads Discord config at import time (it needs DISCORD_TOKEN). Tests never
+# hit the network, so provide a dummy token before any test module imports the app. This
+# also keeps the suite independent of a developer's local .env / config.toml.
+os.environ.setdefault("DISCORD_TOKEN", "test-token-for-pytest")
 
 
 @pytest.fixture

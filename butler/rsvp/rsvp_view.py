@@ -30,9 +30,11 @@ from butler.design import (
 from butler.event_logic import normalize_room_url
 from butler.permissions import member_can_manage_events, permission_denied_message
 from butler.rsvp.rsvp_domain import (
+    RoomSnapshot,
     RoomState,
     RsvpResponse,
     RsvpStatus,
+    visible_room_buttons,
     with_updated_response,
 )
 from butler.rsvp.rsvp_render import RsvpRenderState, render_rsvp_content, room_line
@@ -136,7 +138,7 @@ class AvailabilityView(discord.ui.View):
         self.event_manager_role_id = event_manager_role_id
         self.event_description = event_description
         self.responses: dict[int, RsvpResponse] = {}
-        self.room_state: RoomState = "open" if room_url is not None else "pending"
+        self.room_state: RoomState = RoomSnapshot.from_url(room_url).state
         self._lock = asyncio.Lock()
         self._sync_room_action_buttons()
 
@@ -153,13 +155,14 @@ class AvailabilityView(discord.ui.View):
             self.remove_item(button)
 
     def _sync_room_action_buttons(self) -> None:
+        visible = visible_room_buttons(self.room_state)
         self._set_button_visibility(
             self.prompt_room_link,
-            visible=self.room_state in {"pending", "closed"},
+            visible="open_or_prompt" in visible,
         )
         self._set_button_visibility(
             self.close_room_button,
-            visible=self.room_state == "open",
+            visible="close" in visible,
         )
 
     def _emoji_for_status(self, status: RsvpStatus) -> str | None:
@@ -233,14 +236,16 @@ class AvailabilityView(discord.ui.View):
 
     async def set_room_url(self, room_url: str | None) -> None:
         async with self._lock:
-            self.room_url = room_url
-            self.room_state = "open" if room_url is not None else "pending"
+            snapshot = RoomSnapshot.from_url(room_url)
+            self.room_url = snapshot.url
+            self.room_state = snapshot.state
             self._sync_room_action_buttons()
 
     async def close_room(self) -> None:
         async with self._lock:
-            self.room_url = None
-            self.room_state = "closed"
+            snapshot = RoomSnapshot.closed()
+            self.room_url = snapshot.url
+            self.room_state = snapshot.state
             self._sync_room_action_buttons()
 
     async def get_user_ids_for_status(self, status: RsvpStatus) -> list[int]:
@@ -422,14 +427,14 @@ class RoomManagementView(discord.ui.View):
             self.remove_item(button)
 
     def _sync_room_action_buttons(self) -> None:
-        room_state = self.availability_view.room_state
+        visible = visible_room_buttons(self.availability_view.room_state)
         self._set_button_visibility(
             self.open_room_button,
-            visible=room_state in {"pending", "closed"},
+            visible="open_or_prompt" in visible,
         )
         self._set_button_visibility(
             self.close_room_button,
-            visible=room_state == "open",
+            visible="close" in visible,
         )
 
     def _access_summary(self) -> str:

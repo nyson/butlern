@@ -70,4 +70,11 @@
 ## Validation checklist
 - `poetry run ruff check .`
 - `poetry run mypy`
+- `poetry run pytest`
 - `poetry run python -m compileall butler`
+
+## Testing
+- Tests live in `tests/` and run with `poetry run pytest` (configured under `[tool.pytest.ini_options]`; `asyncio_mode = "auto"`, so `async def test_*` needs no marker).
+- Prefer testing the functional core (pure functions in `event_logic`, `rsvp_domain`, rendering) without any Discord objects.
+- For the imperative shell, use the dependency-free fakes in `tests/fakes.py` (`FakeInteraction`, `FakeGuild`, `FakeMember`, `FakeTextChannel`, `FakePermissions`) instead of a live gateway. They record outgoing messages so tests can assert on bot replies.
+- `tests/` is type-checked by mypy too (added to `files`).

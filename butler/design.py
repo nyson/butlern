@@ -27,6 +27,14 @@ ROOM_LINK_PERMISSION_DENIED_MESSAGE: Final[str] = (
 ROOM_LINK_PERMISSION_DENIED_ROLE_TEMPLATE: Final[str] = (
     "Du behöver rollen {mention} för att öppna eller stänga rum."
 )
+EVENT_MANAGEMENT_PERMISSION_DENIED_MESSAGE: Final[str] = (
+    "Du behöver behörigheten `Hantera server` eller den konfigurerade "
+    "storyteller-rollen för att skapa event och öppna eller stänga rum."
+)
+EVENT_MANAGEMENT_PERMISSION_DENIED_ROLE_TEMPLATE: Final[str] = (
+    "Du behöver behörigheten `Hantera server` eller rollen "
+    "{mention} för att skapa event och öppna eller stänga rum."
+)
 
 
 RSVP_STATUS_EMOJIS: Final[tuple[RsvpStatusEmoji, ...]] = (

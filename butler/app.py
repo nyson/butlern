@@ -20,6 +20,8 @@ from butler.design import (
     DESIGN_PREVIEW_DEFAULT_TITLE,
     EDITION_RESOURCE_ID_BY_NAME,
     EMOJI_TO_STATUS,
+    EVENT_MANAGEMENT_PERMISSION_DENIED_MESSAGE,
+    EVENT_MANAGEMENT_PERMISSION_DENIED_ROLE_TEMPLATE,
     ONBOARDING_MESSAGE,
     RSVP_REACTION_EMOJIS,
 )
@@ -35,6 +37,8 @@ from butler.permissions import (
     get_missing_event_permissions,
     get_missing_post_permissions,
     guild_sync_access_message,
+    member_can_manage_events,
+    permission_denied_message,
 )
 from butler.rsvp.rsvp_domain import status_from_emoji, status_from_emojis
 from butler.rsvp.rsvp_view import AvailabilityView
@@ -97,37 +101,16 @@ def _configured_event_manager_role_id(guild_id: int) -> int | None:
     return SETTINGS_STORE.get_event_manager_role_id(guild_id)
 
 
-def _member_can_manage_events(
-    *,
-    member: discord.Member,
-    event_manager_role_id: int | None,
-) -> bool:
-    if member.guild_permissions.manage_guild:
-        return True
-    if event_manager_role_id is None:
-        return False
-    return any(role.id == event_manager_role_id for role in member.roles)
-
-
 def _event_management_permission_denied_message(
     *,
     guild: discord.Guild,
     event_manager_role_id: int | None,
 ) -> str:
-    if event_manager_role_id is None:
-        return (
-            "Du behöver behörigheten `Hantera server` eller den konfigurerade "
-            "storyteller-rollen för att skapa event och öppna eller stänga rum."
-        )
-    role = guild.get_role(event_manager_role_id)
-    if role is None:
-        return (
-            "Du behöver behörigheten `Hantera server` eller den konfigurerade "
-            "storyteller-rollen för att skapa event och öppna eller stänga rum."
-        )
-    return (
-        "Du behöver behörigheten `Hantera server` eller rollen "
-        f"{role.mention} för att skapa event och öppna eller stänga rum."
+    role = guild.get_role(event_manager_role_id) if event_manager_role_id is not None else None
+    return permission_denied_message(
+        role_mention=role.mention if role is not None else None,
+        without_role=EVENT_MANAGEMENT_PERMISSION_DENIED_MESSAGE,
+        with_role_template=EVENT_MANAGEMENT_PERMISSION_DENIED_ROLE_TEMPLATE,
     )
 
 
@@ -585,8 +568,8 @@ async def event(
         return
 
     event_manager_role_id = _configured_event_manager_role_id(guild.id)
-    if not _member_can_manage_events(
-        member=interaction.user,
+    if not member_can_manage_events(
+        interaction.user,
         event_manager_role_id=event_manager_role_id,
     ):
         await interaction.response.send_message(

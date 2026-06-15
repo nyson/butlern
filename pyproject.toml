@@ -19,8 +19,15 @@ build-backend = "poetry.core.masonry.api"
 [dependency-groups]
 dev = [
     "ruff (>=0.15.17,<0.16.0)",
-    "mypy (>=2.1.0,<3.0.0)"
+    "mypy (>=2.1.0,<3.0.0)",
+    "pytest (>=8.0,<9.0)",
+    "pytest-asyncio (>=0.24,<0.25)"
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-q"
 
 [tool.ruff]
 target-version = "py311"
@@ -54,5 +61,5 @@ strict = true
 warn_unreachable = true
 show_error_codes = true
 pretty = true
-files = ["butler", "bot.py"]
+files = ["butler", "bot.py", "tests"]
 exclude = ["^\\.venv/"]

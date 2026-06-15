@@ -41,6 +41,9 @@ RSVP_REACTION_EMOJIS: Final[tuple[str, ...]] = (
     LATER_EMOJI,
     STORYTELLER_EMOJI,
 )
+EMOJI_TO_STATUS: Final[dict[str, RsvpStatus]] = {
+    emoji: status for status, emoji in RSVP_STATUS_EMOJIS
+}
 RSVP_STATUS_LABELS: Final[dict[RsvpStatus, str]] = {
     "Available": "Jag vill vara med!",
     "Maybe": "Kanske",

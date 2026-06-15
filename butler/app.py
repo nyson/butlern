@@ -19,11 +19,9 @@ from butler.design import (
     DESIGN_PREVIEW_DEFAULT_DESCRIPTION,
     DESIGN_PREVIEW_DEFAULT_TITLE,
     EDITION_RESOURCE_ID_BY_NAME,
-    LATER_EMOJI,
-    MAYBE_EMOJI,
+    EMOJI_TO_STATUS,
     ONBOARDING_MESSAGE,
     RSVP_REACTION_EMOJIS,
-    STORYTELLER_EMOJI,
 )
 from butler.discord_helpers import (
     fetch_message_from_channel,
@@ -38,7 +36,7 @@ from butler.permissions import (
     get_missing_post_permissions,
     guild_sync_access_message,
 )
-from butler.rsvp.rsvp_domain import RsvpStatus
+from butler.rsvp.rsvp_domain import status_from_emoji, status_from_emojis
 from butler.rsvp.rsvp_view import AvailabilityView
 from butler.settings_store import GuildSettingsStore
 
@@ -61,16 +59,6 @@ BOTC_EDITION_CHOICES: Final[list[app_commands.Choice[str]]] = [
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix=commands.when_mentioned, intents=intents)
-
-
-def _reaction_status_from_emoji(emoji: str) -> RsvpStatus:
-    if emoji == MAYBE_EMOJI:
-        return "Maybe"
-    if emoji == LATER_EMOJI:
-        return "Later"
-    if emoji == STORYTELLER_EMOJI:
-        return "Storyteller"
-    return "Available"
 
 
 def _build_event_url(*, guild_id: int, event_id: int) -> str:
@@ -155,37 +143,17 @@ async def _user_has_reaction(
     return False
 
 
-async def _status_from_message_reactions(
+async def _user_reaction_emojis(
     *,
     message: discord.Message,
     user_id: int,
-) -> RsvpStatus | None:
-    has_available_reaction = False
-    has_later_reaction = False
-    has_storyteller_reaction = False
-
+) -> list[str]:
+    """Gather the emoji strings the given user has reacted with on the message (I/O only)."""
+    emojis: list[str] = []
     for reaction in message.reactions:
-        if not await _user_has_reaction(reaction, user_id=user_id):
-            continue
-
-        emoji = str(reaction.emoji)
-        if emoji == MAYBE_EMOJI:
-            return "Maybe"
-        if emoji == LATER_EMOJI:
-            has_later_reaction = True
-            continue
-        if emoji == STORYTELLER_EMOJI:
-            has_storyteller_reaction = True
-            continue
-        has_available_reaction = True
-
-    if has_later_reaction:
-        return "Later"
-    if has_storyteller_reaction:
-        return "Storyteller"
-    if has_available_reaction:
-        return "Available"
-    return None
+        if await _user_has_reaction(reaction, user_id=user_id):
+            emojis.append(str(reaction.emoji))
+    return emojis
 
 
 async def _edit_rsvp_message(
@@ -408,7 +376,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent) -> None:
     if view is None:
         return
 
-    status = _reaction_status_from_emoji(str(payload.emoji))
+    status = status_from_emoji(str(payload.emoji), EMOJI_TO_STATUS)
 
     await view.set_user_response(user_id=payload.user_id, status=status)
     message = await fetch_message_from_channel(
@@ -439,10 +407,11 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent) -> Non
     if message is None:
         return
 
-    resolved_status = await _status_from_message_reactions(
+    user_emojis = await _user_reaction_emojis(
         message=message,
         user_id=payload.user_id,
     )
+    resolved_status = status_from_emojis(user_emojis, EMOJI_TO_STATUS)
     if resolved_status is None:
         await view.remove_user_response(payload.user_id)
     else:

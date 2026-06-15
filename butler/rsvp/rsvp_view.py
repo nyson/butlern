@@ -2,18 +2,16 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
-from typing import ClassVar, Final, Literal
+from typing import ClassVar, Final
 
 import discord
 
 from butler.design import (
     ARRIVE_LATER_BUTTON_LABEL,
     AVAILABLE_BUTTON_LABEL,
-    EVENT_POST_TEMPLATE,
     MAYBE_BUTTON_LABEL,
     ROOM_CLOSE_BUTTON_EMOJI,
     ROOM_CLOSE_BUTTON_LABEL,
-    ROOM_CLOSED_MESSAGE,
     ROOM_LINK_MODAL_INVALID_MESSAGE,
     ROOM_LINK_MODAL_LABEL,
     ROOM_LINK_MODAL_MAX_LENGTH,
@@ -23,26 +21,21 @@ from butler.design import (
     ROOM_LINK_PERMISSION_DENIED_ROLE_TEMPLATE,
     ROOM_LINK_PROMPT_BUTTON_EMOJI,
     ROOM_LINK_PROMPT_BUTTON_LABEL,
-    ROOM_OPENED_MESSAGE_TEMPLATE,
     ROOM_OPENED_NO_MENTIONS_TEMPLATE,
     ROOM_OPENED_WITH_MENTIONS_TEMPLATE,
-    RSVP_FOOTER_TEXT,
     RSVP_STATUS_EMOJIS,
-    RSVP_STATUS_LABELS,
     STORYTELLER_BUTTON_LABEL,
     STORYTELLER_EMOJI,
 )
 from butler.event_logic import normalize_room_url
 from butler.permissions import member_can_manage_events, permission_denied_message
 from butler.rsvp.rsvp_domain import (
+    RoomState,
     RsvpResponse,
     RsvpStatus,
-    mentions_for_status,
-    status_count,
     with_updated_response,
 )
-
-RoomState = Literal["pending", "open", "closed"]
+from butler.rsvp.rsvp_render import RsvpRenderState, render_rsvp_content, room_line
 
 
 def _build_user_mentions(user_ids: list[int]) -> str:
@@ -169,20 +162,6 @@ class AvailabilityView(discord.ui.View):
             visible=self.room_state == "open",
         )
 
-    def _build_room_section(self) -> str | None:
-        if self.room_state == "open" and self.room_url is not None:
-            return (
-                f"{ROOM_OPENED_MESSAGE_TEMPLATE.format(room_url=self.room_url)}"
-                "\n\n"
-            )
-        if self.room_state == "closed":
-            return f"{ROOM_CLOSED_MESSAGE}\n\n"
-        return None
-
-    def _build_title_line(self) -> str:
-        if self.edition_emoji is None:
-            return self.event_name
-        return f"{self.edition_emoji} {self.event_name}"
     def _emoji_for_status(self, status: RsvpStatus) -> str | None:
         for mapped_status, emoji in self.STATUSES:
             if mapped_status == status:
@@ -205,24 +184,18 @@ class AvailabilityView(discord.ui.View):
             with suppress(discord.HTTPException):
                 await message.remove_reaction(emoji, user)
 
-    def _build_status_sections(self) -> str:
-        sections: list[str] = []
-        for status, emoji in self.STATUSES:
-            count = status_count(self.responses, status)
-            display_label = RSVP_STATUS_LABELS[status]
-            mentions = mentions_for_status(self.responses, status) or ""
-            sections.append(f"{emoji} **{display_label} ({count})**\n{mentions}")
-        return "\n\n".join(sections)
+    def _render_state(self) -> RsvpRenderState:
+        return RsvpRenderState(
+            event_name=self.event_name,
+            event_description=self.event_description,
+            edition_emoji=self.edition_emoji,
+            room_state=self.room_state,
+            room_url=self.room_url,
+            responses=self.responses,
+        )
 
     def build_content(self) -> str:
-        title_line = self._build_title_line()
-        return EVENT_POST_TEMPLATE.format(
-            title_line=title_line,
-            event_description=self.event_description,
-            room_section=self._build_room_section() or "\n",
-            status_sections=self._build_status_sections(),
-            footer_text=RSVP_FOOTER_TEXT,
-        )
+        return render_rsvp_content(self._render_state())
 
     def build_embed(self) -> discord.Embed | None:
         return None
@@ -465,19 +438,14 @@ class RoomManagementView(discord.ui.View):
         return f"`Hantera server` eller <@&{self.event_manager_role_id}>"
 
     def build_content(self) -> str:
-        room_line = ""
-        if (
-            self.availability_view.room_state == "open"
-            and self.availability_view.room_url is not None
-        ):
-            room_line = ROOM_OPENED_MESSAGE_TEMPLATE.format(
-                room_url=self.availability_view.room_url)
-        elif self.availability_view.room_state == "closed":
-            room_line = ROOM_CLOSED_MESSAGE
+        line = room_line(
+            room_state=self.availability_view.room_state,
+            room_url=self.availability_view.room_url,
+        )
         return (
             "## Rumshantering\n"
             f"Behörighet: {self._access_summary()}\n"
-            f"{room_line}"
+            f"{line or ''}"
         )
 
     def permission_denied_message(self, interaction: discord.Interaction) -> str:

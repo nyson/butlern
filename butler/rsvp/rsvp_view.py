@@ -68,7 +68,7 @@ def _room_permission_denied_message(
 ) -> str:
     guild = interaction.guild
     role_id = event_manager_role_id
-    role = guild and role_id and guild.get_role(role_id) or None
+    role = (guild and role_id and guild.get_role(role_id)) or None
     if role:
         return ROOM_LINK_PERMISSION_DENIED_ROLE_TEMPLATE.format(mention=role.mention)
     return ROOM_LINK_PERMISSION_DENIED_MESSAGE
@@ -172,7 +172,7 @@ class AvailabilityView(discord.ui.View):
                 f"{ROOM_OPENED_MESSAGE_TEMPLATE.format(room_url=self.room_url)}"
                 "\n\n"
             )
-        elif self.room_state == "closed":
+        if self.room_state == "closed":
             return f"{ROOM_CLOSED_MESSAGE}\n\n"
         return None
 

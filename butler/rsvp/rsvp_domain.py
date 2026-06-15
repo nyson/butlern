@@ -6,6 +6,8 @@ from typing import Final, Literal
 
 RsvpStatus = Literal["Available", "Maybe", "Later", "Storyteller"]
 RoomState = Literal["pending", "open", "closed"]
+# Logical room-action buttons, independent of which view renders them.
+RoomButton = Literal["open_or_prompt", "close"]
 
 # Order in which reaction-derived statuses win when a user holds several reactions
 # at once: Maybe > Later > Storyteller > Available.
@@ -15,6 +17,35 @@ REACTION_STATUS_PRECEDENCE: Final[tuple[RsvpStatus, ...]] = (
     "Storyteller",
     "Available",
 )
+
+
+@dataclass(frozen=True)
+class RoomSnapshot:
+    """Immutable result of a room-lifecycle transition: the state and its URL."""
+
+    state: RoomState
+    url: str | None
+
+    @classmethod
+    def from_url(cls, room_url: str | None) -> RoomSnapshot:
+        """Setting a URL opens the room; clearing it reverts to `pending`."""
+        if room_url is None:
+            return cls(state="pending", url=None)
+        return cls(state="open", url=room_url)
+
+    @classmethod
+    def closed(cls) -> RoomSnapshot:
+        return cls(state="closed", url=None)
+
+
+def visible_room_buttons(room_state: RoomState) -> frozenset[RoomButton]:
+    """Which room-action buttons should be visible for a given room state.
+
+    `open`: only the close button. `pending`/`closed`: only the open/prompt button.
+    """
+    if room_state == "open":
+        return frozenset({"close"})
+    return frozenset({"open_or_prompt"})
 
 
 @dataclass(frozen=True)

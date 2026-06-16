@@ -6,6 +6,7 @@ services:
     env_file:
       - .env
     environment:
+      TZ: Europe/Stockholm
       BUTLER_DB_PATH: /data/butler_state.db
     volumes:
       - butler_data:/data

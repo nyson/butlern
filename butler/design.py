@@ -89,7 +89,7 @@ ROOM_CLOSED_MESSAGE: Final[str] = "**Rummet är nu stängt!** Tack för ikväll!
 ROOM_LINK_MODAL_TITLE: Final[str] = "Lägg till rumslänk"
 ROOM_LINK_MODAL_LABEL: Final[str] = "Rumslänk (http/https)"
 ROOM_LINK_MODAL_PLACEHOLDER: Final[str] = "https://example.com/rum"
-ROOM_LINK_MODAL_MAX_LENGTH: Final[int] = 30
+ROOM_LINK_MODAL_MAX_LENGTH: Final[int] = 250
 ROOM_LINK_MODAL_INVALID_MESSAGE: Final[str] = (
     "Ogiltig länk. Använd en fullständig URL som börjar med http:// eller https://."
 )

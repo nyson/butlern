@@ -9,7 +9,6 @@ from discord.ext import commands
 
 from butler.config import load_config
 from butler.constants import (
-    CONFIG_PATH,
     DEFAULT_EVENT_DURATION,
     DEFAULT_EVENT_LOCATION,
     DEFAULT_EVENT_START_TIME,
@@ -44,7 +43,7 @@ from butler.rsvp.rsvp_domain import status_from_emoji, status_from_emojis
 from butler.rsvp.rsvp_view import AvailabilityView
 from butler.settings_store import GuildSettingsStore
 
-CONFIG = load_config(CONFIG_PATH)
+CONFIG = load_config()
 TOKEN: Final[str] = CONFIG.token
 DEV_GUILD_ID: Final[int | None] = CONFIG.guild_id
 _force_guild_sync = False

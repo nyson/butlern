@@ -87,7 +87,7 @@ def with_updated_response(
 
 
 def status_count(responses: dict[int, RsvpResponse], status: RsvpStatus) -> int:
-    return len([1 for response in responses.values() if response.status])
+    return len([r for r in responses.values() if r.status == status])
 
 
 def mentions_for_status(responses: dict[int, RsvpResponse], status: RsvpStatus) -> str | None:

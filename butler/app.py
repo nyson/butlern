@@ -89,11 +89,6 @@ def _resolve_edition_media(
         return None, None
     return str(emoji), str(emoji.url)
 
-
-# def _build_user_mentions(user_ids: list[int]) -> str:
-#     unique_user_ids = sorted(set(user_ids))
-#     return " ".join(f"<@{user_id}>" for user_id in unique_user_ids)
-
 def _configured_event_manager_role_id(guild_id: int) -> int | None:
     return SETTINGS_STORE.get_event_manager_role_id(guild_id)
 

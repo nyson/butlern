@@ -44,8 +44,6 @@ from butler.rsvp.rsvp_view import AvailabilityView
 from butler.settings_store import GuildSettingsStore
 
 CONFIG = load_config()
-TOKEN: Final[str] = CONFIG.token
-DEV_GUILD_ID: Final[int | None] = CONFIG.guild_id
 _force_guild_sync = False
 SETTINGS_STORE = GuildSettingsStore.load(SETTINGS_PATH)
 ACTIVE_RSVP_VIEWS: dict[int, AvailabilityView] = {}
@@ -241,16 +239,16 @@ async def _sync_to_guild(guild_id: int, *, strict: bool) -> None:
 
 async def _sync_commands_on_startup() -> None:
     if _force_guild_sync:
-        if DEV_GUILD_ID is None:
+        if CONFIG.guild_id is None:
             raise RuntimeError(
                 "butler-dev requires DISCORD_GUILD_ID in .env or the environment."
             )
-        await _sync_to_guild(DEV_GUILD_ID, strict=True)
+        await _sync_to_guild(CONFIG.guild_id, strict=True)
         print("Forced dev mode command sync is active.")
         return
 
-    if DEV_GUILD_ID is not None:
-        await _sync_to_guild(DEV_GUILD_ID, strict=False)
+    if CONFIG.guild_id is not None:
+        await _sync_to_guild(CONFIG.guild_id, strict=False)
 
     await bot.tree.sync()
     print("Synced global commands.")
@@ -776,9 +774,9 @@ async def previeweventdesign(
 def main(*, force_guild_sync: bool = False) -> None:
     global _force_guild_sync
     _force_guild_sync = force_guild_sync
-    if not TOKEN:
+    if not CONFIG.token:
         raise RuntimeError("Missing DISCORD_TOKEN in .env or the environment.")
-    bot.run(TOKEN)
+    bot.run(CONFIG.token)
 
 
 def main_dev() -> None:

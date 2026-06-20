@@ -2,19 +2,16 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Final, Literal
+from typing import Final
 
-RsvpStatus = Literal["Available", "Maybe", "Later", "Storyteller"]
-RoomState = Literal["pending", "open", "closed"]
-# Logical room-action buttons, independent of which view renders them.
-RoomButton = Literal["open_or_prompt", "close"]
+from butler.design import STORYTELLER_EMOJI
+from butler.rsvp.types import RoomButton, RoomState, RsvpRole, RsvpStatus
 
 # Order in which reaction-derived statuses win when a user holds several reactions
 # at once: Maybe > Later > Storyteller > Available.
 REACTION_STATUS_PRECEDENCE: Final[tuple[RsvpStatus, ...]] = (
     "Maybe",
     "Later",
-    "Storyteller",
     "Available",
 )
 
@@ -51,6 +48,7 @@ def visible_room_buttons(room_state: RoomState) -> frozenset[RoomButton]:
 @dataclass(frozen=True)
 class RsvpResponse:
     status: RsvpStatus
+    role: RsvpRole = "Player"
     arrival_time: str | None = None
 
 
@@ -71,7 +69,7 @@ def status_from_emojis(
     for status in REACTION_STATUS_PRECEDENCE:
         if status in present:
             return status
-    return None
+    return "Available"
 
 
 def with_updated_response(
@@ -79,10 +77,11 @@ def with_updated_response(
     *,
     user_id: int,
     status: RsvpStatus,
+    role: RsvpRole,
     arrival_time: str | None = None,
 ) -> dict[int, RsvpResponse]:
     updated = dict(responses)
-    updated[user_id] = RsvpResponse(status=status, arrival_time=arrival_time)
+    updated[user_id] = RsvpResponse(status=status, role=role, arrival_time=arrival_time)
     return updated
 
 
@@ -95,10 +94,10 @@ def mentions_for_status(responses: dict[int, RsvpResponse], status: RsvpStatus) 
     for user_id, response in responses.items():
         if response.status != status:
             continue
-        if status == "Later" and response.arrival_time:
-            mentions.append(f"<@{user_id}> ({response.arrival_time})")
-        else:
-            mentions.append(f"<@{user_id}>")
+
+        st_emoji = (response.role == "Storyteller" and f" {STORYTELLER_EMOJI}") or ""
+        arrival = (response.arrival_time and f" ({response.arrival_time})") or ""
+        mentions.append(f"{st_emoji}<@{user_id}>{arrival}")
 
     if not mentions:
         return None

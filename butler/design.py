@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Final
 
-from butler.rsvp.rsvp_domain import RsvpStatus
+from butler.rsvp.types import RsvpRole, RsvpStatus
 
 RsvpStatusEmoji = tuple[RsvpStatus, str]
 
@@ -40,8 +40,7 @@ EVENT_MANAGEMENT_PERMISSION_DENIED_ROLE_TEMPLATE: Final[str] = (
 RSVP_STATUS_EMOJIS: Final[tuple[RsvpStatusEmoji, ...]] = (
     ("Available", AVAILABLE_EMOJI),
     ("Maybe", MAYBE_EMOJI),
-    ("Later", LATER_EMOJI),
-    ("Storyteller", STORYTELLER_EMOJI),
+    # ("Later", LATER_EMOJI),
 )
 RSVP_REACTION_EMOJIS: Final[tuple[str, ...]] = (
     AVAILABLE_EMOJI,
@@ -52,7 +51,7 @@ RSVP_REACTION_EMOJIS: Final[tuple[str, ...]] = (
 EMOJI_TO_STATUS: Final[dict[str, RsvpStatus]] = {
     emoji: status for status, emoji in RSVP_STATUS_EMOJIS
 }
-RSVP_STATUS_LABELS: Final[dict[RsvpStatus, str]] = {
+RSVP_STATUS_LABELS: Final[dict[RsvpStatus | RsvpRole, str]] = {
     "Available": "Jag vill vara med!",
     "Maybe": "Kanske",
     "Later": "Kommer senare",
@@ -85,6 +84,8 @@ EVENT_POST_TEMPLATE: Final[str] = (
 )
 ROOM_OPENED_MESSAGE_TEMPLATE: Final[str] = "**Rummet är öppet:** {room_url}"
 ROOM_CLOSED_MESSAGE: Final[str] = "**Rummet är nu stängt!** Tack för ikväll!"
+
+ARRIVE_LATER_MODAL_TITLE: Final[str] = "Jag kommer senare"
 
 ROOM_LINK_MODAL_TITLE: Final[str] = "Lägg till rumslänk"
 ROOM_LINK_MODAL_LABEL: Final[str] = "Rumslänk (http/https)"

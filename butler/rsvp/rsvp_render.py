@@ -21,11 +21,11 @@ from butler.design import (
     RSVP_STATUS_LABELS,
 )
 from butler.rsvp.rsvp_domain import (
-    RoomState,
     RsvpResponse,
     mentions_for_status,
     status_count,
 )
+from butler.rsvp.types import RoomState
 
 
 @dataclass(frozen=True)

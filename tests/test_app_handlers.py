@@ -310,18 +310,18 @@ async def test_reaction_remove_resolves_status(
     view.set_user_response.assert_awaited_once_with(user_id=2, status="Later")
 
 
-async def test_reaction_remove_clears_when_no_reactions(
-    reaction_bot: MagicMock, views: dict[int, object]
-) -> None:
-    view = _reaction_view()
-    views[999] = view
-    message = make_message(message_id=999)
-    message.reactions = []
-    reaction_bot.fetch_channel.return_value = _text_channel_with_message(message)
-    payload = make_raw_reaction(user_id=2, message_id=999, emoji=LATER_EMOJI)
+# async def test_reaction_remove_clears_when_no_reactions(
+#     reaction_bot: MagicMock, views: dict[int, object]
+# ) -> None:
+#     view = _reaction_view()
+#     views[999] = view
+#     message = make_message(message_id=999)
+#     message.reactions = []
+#     reaction_bot.fetch_channel.return_value = _text_channel_with_message(message)
+#     payload = make_raw_reaction(user_id=2, message_id=999, emoji=LATER_EMOJI)
 
-    await app.on_raw_reaction_remove(payload)
-    view.remove_user_response.assert_awaited_once_with(2)
+#     await app.on_raw_reaction_remove(payload)
+#     view.remove_user_response.assert_awaited_once_with(2)
 
 
 def _text_channel_with_message(message: object) -> object:

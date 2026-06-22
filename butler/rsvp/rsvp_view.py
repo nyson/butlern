@@ -260,7 +260,8 @@ class AvailabilityView(discord.ui.View):
     ) -> None:
         await self.with_response_or_default(user_id, lambda current: RsvpResponse(
             role="Player" if current.role == "Storyteller" else "Storyteller",
-            status=(current and current.status) or "Available",
+            status=(current and current.status != "Cant" and current.status)\
+                or "Available",
             arrival_time=(current and current.arrival_time) or None,
         ))
 
@@ -333,9 +334,9 @@ class AvailabilityView(discord.ui.View):
     ) -> None:
         await interaction.response.defer(ephemeral=True, thinking=False)
         await self.with_response_or_default(interaction.user.id, lambda current: RsvpResponse(
-            role=current.role,
+            role=status == "Cant" and "Player" or current.role,
             status=status,
-            arrival_time=arrival_time,
+            arrival_time=status == "Cant" and None or arrival_time,
         ))
 
         if interaction.message is None:
@@ -605,7 +606,6 @@ class RoomManagementView(discord.ui.View):
         await self.availability_view.close_room()
         await self.refresh_messages(interaction)
 
-
 class RoomManagementRoomLinkModal(discord.ui.Modal, title=ROOM_LINK_MODAL_TITLE):
     room_link: ClassVar[discord.ui.TextInput[RoomManagementRoomLinkModal]] = discord.ui.TextInput(
         label=ROOM_LINK_MODAL_LABEL,
@@ -681,16 +681,15 @@ class ArrivingLaterModal(discord.ui.Modal, title=ARRIVE_LATER_MODAL_TITLE):
                 ephemeral=True,
             )
 
-        await self.view.set_user_response(
-            user_id = interaction.user.id,
-            status= "Available",
-            arrival_time=arrival_time)
+        await self.view.with_response_or_default(
+            interaction.user.id, 
+            lambda current: RsvpResponse(
+                role=current.role,
+                status=current.status == "Cant" and "Available" or current.status,
+                arrival_time=arrival_time))
 
         if interaction.message is not None:
-            await interaction.message.edit(
-                content=await self.view.build_content(),
-                embed=self.view.build_embed(),
-                view=self.view)
+            await self.view.rebuild(interaction)
             await interaction.response.defer(ephemeral=True, thinking=False)
 
 

@@ -60,7 +60,7 @@ EMOJI_TO_STATUS: Final[dict[str, RsvpStatus]] = {
 }
 RSVP_STATUS_LABELS: Final[dict[RsvpStatus | RsvpRole, str]] = {
     "Available": "Jag vill vara med!",
-    "Maybe": "Kanske",
+    "Maybe": "Jag kommer förmodligen, kan inte lova något",
     "Cant": "Kan inte ikväll 😞"
 }
 

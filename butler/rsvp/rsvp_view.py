@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from typing import ClassVar, Final
 
@@ -13,6 +14,7 @@ from butler.design import (
     ARRIVE_LATER_EMOJI,
     ARRIVE_LATER_MODAL_TITLE,
     AVAILABLE_BUTTON_LABEL,
+    CANT_BUTTON_LABEL,
     MAYBE_BUTTON_LABEL,
     ROOM_CLOSE_BUTTON_EMOJI,
     ROOM_CLOSE_BUTTON_LABEL,
@@ -40,7 +42,7 @@ from butler.rsvp.rsvp_domain import (
     with_updated_response,
 )
 from butler.rsvp.rsvp_render import RsvpRenderState, render_rsvp_content, room_line
-from butler.rsvp.types import RoomState, RsvpRole, RsvpStatus
+from butler.rsvp.types import RoomState, RsvpStatus
 
 
 def _build_user_mentions(user_ids: list[int]) -> str:
@@ -80,11 +82,7 @@ async def _announce_room_opening(
     availability_view: AvailabilityView,
     message_link: str,
 ) -> None:
-    statuses_to_ping: tuple[RsvpStatus, ...] = (
-        "Available",
-        "Maybe",
-        "Later",
-    )
+    statuses_to_ping: tuple[RsvpStatus, ...] = ("Available","Maybe")
     user_ids_to_ping: list[int] = []
     for status in statuses_to_ping:
         user_ids_to_ping.extend(await availability_view.get_user_ids_for_status(status))
@@ -199,6 +197,21 @@ class AvailabilityView(discord.ui.View):
             responses=self.responses,
         )
 
+    def _get_response_or_default(self, user_id: int) -> RsvpResponse:
+        return self.responses.get(user_id) \
+            or RsvpResponse(role="Player", status="Available", arrival_time=None)
+
+    def _update_response(self, user_id: int, response: RsvpResponse) -> None:
+        self.responses[user_id] = response
+
+    async def with_response_or_default(
+            self,
+            user_id: int,
+            fn: Callable[[RsvpResponse], RsvpResponse]
+        ) -> None:
+        async with self._lock:
+            self._update_response(user_id, fn(self._get_response_or_default(user_id)))
+
     def build_content(self) -> str:
         return render_rsvp_content(self._render_state())
 
@@ -219,22 +232,11 @@ class AvailabilityView(discord.ui.View):
         *,
         user_id: int,
     ) -> None:
-        current = self.responses.get(user_id)
-
-        if ((current and current.role) or None) == "Storyteller":
-            role: RsvpRole = "Player"
-        else:
-            role = "Storyteller"
-
-        async with self._lock:
-            self.responses = with_updated_response(
-                self.responses,
-                user_id=user_id,
-                role=role,
-                status=(current and current.status) or "Available"
-            )
-
-            print(f"{self.responses[user_id]}")
+        await self.with_response_or_default(user_id, lambda current: RsvpResponse(
+            role="Player" if current.role == "Storyteller" else "Storyteller",
+            status=(current and current.status) or "Available",
+            arrival_time=(current and current.arrival_time) or None,
+        ))
 
     async def set_user_response(
         self,
@@ -311,11 +313,11 @@ class AvailabilityView(discord.ui.View):
         arrival_time: str | None = None,
     ) -> None:
         await interaction.response.defer(ephemeral=True, thinking=False)
-        await self.set_user_response(
-            user_id=interaction.user.id,
+        await self.with_response_or_default(interaction.user.id, lambda current: RsvpResponse(
+            role=current.role,
             status=status,
             arrival_time=arrival_time,
-        )
+        ))
         if interaction.message is None:
             return
         await self._remove_other_rsvp_reactions_for_user(
@@ -357,6 +359,19 @@ class AvailabilityView(discord.ui.View):
         _: discord.ui.Button[AvailabilityView],
     ) -> None:
         await self._record_availability(interaction, "Maybe")
+
+    @discord.ui.button(
+        label=CANT_BUTTON_LABEL,
+        style=discord.ButtonStyle.secondary,
+        emoji=RSVP_STATUS_EMOJIS[2][1],
+        row=0,
+    )
+    async def cant(
+        self,
+        interaction: discord.Interaction,
+        _: discord.ui.Button[AvailabilityView],
+    ) -> None:
+        await self._record_availability(interaction, "Cant")
 
     @discord.ui.button(
         label=ARRIVE_LATER_BUTTON_LABEL,
@@ -732,7 +747,6 @@ class RoomLinkModal(discord.ui.Modal, title=ROOM_LINK_MODAL_TITLE):
         statuses_to_ping: tuple[RsvpStatus, ...] = (
             "Available",
             "Maybe",
-            "Later",
         )
         user_ids_to_ping: list[int] = []
         for status in statuses_to_ping:

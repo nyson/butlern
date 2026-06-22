@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import butler.app as app
-from butler.design import ARRIVE_LATER_EMOJI, AVAILABLE_EMOJI
+from butler.design import AVAILABLE_EMOJI, CANT_EMOJI
 from tests.discord_mocks import (
     invoke,
     make_guild,
@@ -302,12 +302,12 @@ async def test_reaction_remove_resolves_status(
     view = _reaction_view()
     views[999] = view
     message = make_message(message_id=999)
-    message.reactions = [make_reaction(emoji=ARRIVE_LATER_EMOJI, user_ids=(2,))]
+    message.reactions = [make_reaction(emoji=CANT_EMOJI, user_ids=(2,))]
     reaction_bot.fetch_channel.return_value = _text_channel_with_message(message)
-    payload = make_raw_reaction(user_id=2, message_id=999, emoji=ARRIVE_LATER_EMOJI)
+    payload = make_raw_reaction(user_id=2, message_id=999, emoji=CANT_EMOJI)
 
     await app.on_raw_reaction_remove(payload)
-    view.set_user_response.assert_awaited_once_with(user_id=2, status="Later")
+    view.set_user_response.assert_awaited_once_with(user_id=2, status="Cant")
 
 
 # async def test_reaction_remove_clears_when_no_reactions(

@@ -10,9 +10,9 @@ from butler.rsvp.types import RoomButton, RoomState, RsvpRole, RsvpStatus
 # Order in which reaction-derived statuses win when a user holds several reactions
 # at once: Maybe > Later > Storyteller > Available.
 REACTION_STATUS_PRECEDENCE: Final[tuple[RsvpStatus, ...]] = (
-    "Maybe",
-    "Later",
     "Available",
+    "Maybe",
+    "Cant",
 )
 
 

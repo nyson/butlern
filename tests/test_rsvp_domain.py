@@ -10,6 +10,7 @@ from __future__ import annotations
 from butler.design import (
     ARRIVE_LATER_EMOJI,
     AVAILABLE_EMOJI,
+    CANT_EMOJI,
     EMOJI_TO_STATUS,
     MAYBE_EMOJI,
     STORYTELLER_EMOJI,
@@ -44,10 +45,10 @@ def test_with_updated_response_stores_arrival_time() -> None:
     responses = with_updated_response(
         {},
         user_id=1,
-        status="Later",
+        status="Available",
         role="Player",
         arrival_time="20:30")
-    assert responses[1] == RsvpResponse(status="Later", arrival_time="20:30")
+    assert responses[1] == RsvpResponse(status="Available", arrival_time="20:30")
 
 
 # --- status_count -----------------------------------------------------------
@@ -61,7 +62,7 @@ def test_status_count_counts_only_matching() -> None:
     }
     assert status_count(responses, "Available") == 2
     assert status_count(responses, "Maybe") == 1
-    assert status_count(responses, "Later") == 0
+    assert status_count(responses, "Cant") == 0
 
 
 # --- mentions_for_status ----------------------------------------------------
@@ -72,8 +73,8 @@ def test_mentions_for_status_empty_is_none() -> None:
 
 
 def test_mentions_for_status_later_includes_arrival_time() -> None:
-    responses = {7: RsvpResponse(status="Later", arrival_time="21:00")}
-    assert mentions_for_status(responses, "Later") == "<@7> (21:00)"
+    responses = {7: RsvpResponse(status="Available", arrival_time="21:00")}
+    assert mentions_for_status(responses, "Available") == "<@7> (21:00)"
 
 
 def test_mentions_for_status_other_status_is_plain_mention() -> None:
@@ -82,8 +83,8 @@ def test_mentions_for_status_other_status_is_plain_mention() -> None:
 
 
 def test_mentions_for_status_later_without_arrival_time_is_plain() -> None:
-    responses = {7: RsvpResponse(status="Later")}
-    assert mentions_for_status(responses, "Later") == "<@7>"
+    responses = {7: RsvpResponse(status="Available")}
+    assert mentions_for_status(responses, "Available") == "<@7>"
 
 
 def test_mentions_for_status_truncates_past_fifteen() -> None:
@@ -100,7 +101,7 @@ def test_mentions_for_status_truncates_past_fifteen() -> None:
 def test_status_from_emoji_maps_each_emoji() -> None:
     assert status_from_emoji(AVAILABLE_EMOJI, EMOJI_TO_STATUS) == "Available"
     assert status_from_emoji(MAYBE_EMOJI, EMOJI_TO_STATUS) == "Maybe"
-    assert status_from_emoji(ARRIVE_LATER_EMOJI, EMOJI_TO_STATUS) == "Later"
+    assert status_from_emoji(CANT_EMOJI, EMOJI_TO_STATUS) == "Cant"
 
 
 def test_status_from_emoji_unknown_is_available() -> None:
@@ -112,12 +113,12 @@ def test_status_from_emoji_unknown_is_available() -> None:
 
 
 def test_status_from_emojis_precedence_maybe_wins() -> None:
-    emojis = [ARRIVE_LATER_EMOJI, MAYBE_EMOJI, STORYTELLER_EMOJI, AVAILABLE_EMOJI]
-    assert status_from_emojis(emojis, EMOJI_TO_STATUS) == "Maybe"
+    emojis = [CANT_EMOJI, MAYBE_EMOJI, AVAILABLE_EMOJI]
+    assert status_from_emojis(emojis, EMOJI_TO_STATUS) == "Available"
 
 
 def test_status_from_emojis_precedence_later_over_storyteller() -> None:
-    assert status_from_emojis([STORYTELLER_EMOJI, ARRIVE_LATER_EMOJI], EMOJI_TO_STATUS) == "Later"
+    assert status_from_emojis([STORYTELLER_EMOJI, ARRIVE_LATER_EMOJI], EMOJI_TO_STATUS) == "Available"
 
 
 # def test_status_from_emojis_precedence_storyteller_over_available() -> None:

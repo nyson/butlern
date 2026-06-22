@@ -118,7 +118,9 @@ def test_status_from_emojis_precedence_maybe_wins() -> None:
 
 
 def test_status_from_emojis_precedence_later_over_storyteller() -> None:
-    assert status_from_emojis([STORYTELLER_EMOJI, ARRIVE_LATER_EMOJI], EMOJI_TO_STATUS) == "Available"
+    assert status_from_emojis(
+        [STORYTELLER_EMOJI, ARRIVE_LATER_EMOJI],
+        EMOJI_TO_STATUS) == "Available"
 
 
 # def test_status_from_emojis_precedence_storyteller_over_available() -> None:

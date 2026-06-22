@@ -334,9 +334,9 @@ class AvailabilityView(discord.ui.View):
     ) -> None:
         await interaction.response.defer(ephemeral=True, thinking=False)
         await self.with_response_or_default(interaction.user.id, lambda current: RsvpResponse(
-            role=status == "Cant" and "Player" or current.role,
+            role=(status == "Cant" and "Player") or current.role,
             status=status,
-            arrival_time=status == "Cant" and None or arrival_time,
+            arrival_time=(status == "Cant" and None) or arrival_time,
         ))
 
         if interaction.message is None:
@@ -682,10 +682,10 @@ class ArrivingLaterModal(discord.ui.Modal, title=ARRIVE_LATER_MODAL_TITLE):
             )
 
         await self.view.with_response_or_default(
-            interaction.user.id, 
+            interaction.user.id,
             lambda current: RsvpResponse(
                 role=current.role,
-                status=current.status == "Cant" and "Available" or current.status,
+                status=(current.status == "Cant" and "Available") or current.status,
                 arrival_time=arrival_time))
 
         if interaction.message is not None:

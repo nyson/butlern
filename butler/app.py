@@ -138,7 +138,7 @@ async def _edit_rsvp_message(
 ) -> None:
     try:
         await message.edit(
-            content=view.build_content(),
+            content=await view.build_content(),
             embed=view.build_embed(),
             view=view,
         )
@@ -297,11 +297,16 @@ async def _post_rsvp_message(
     try:
         if event_link_message is not None:
             await event_channel.send(content=event_link_message)
+
         embed = view.build_embed()
+        content = await view.build_content()
+
         if embed is None:
-            return await event_channel.send(content=view.build_content(), view=view)
+            return await event_channel.send(
+                content=content,
+                view=view)
         return await event_channel.send(
-            content=view.build_content(),
+            content=content,
             embed=embed,
             view=view,
         )

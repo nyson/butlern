@@ -2,31 +2,39 @@ from __future__ import annotations
 
 from typing import Final
 
-from butler.rsvp.rsvp_domain import RsvpStatus
+from butler.rsvp.types import RsvpRole, RsvpStatus
 
 RsvpStatusEmoji = tuple[RsvpStatus, str]
 
-AVAILABLE_EMOJI: Final[str] = "✅"
-MAYBE_EMOJI: Final[str] = "🤔"
-LATER_EMOJI: Final[str] = "🕒"
-STORYTELLER_EMOJI: Final[str] = "😈"
-
+AVAILABLE_EMOJI: Final[str] = "🪓"
 AVAILABLE_BUTTON_LABEL: Final[str] = "Jag vill vara med!"
-MAYBE_BUTTON_LABEL: Final[str] = "Kanske"
+
+MAYBE_EMOJI: Final[str] = "🤔"
+MAYBE_BUTTON_LABEL: Final[str] = "Förmodligen"
+
+ARRIVE_LATER_EMOJI: Final[str] = "🕒"
 ARRIVE_LATER_BUTTON_LABEL: Final[str] = "Kommer senare"
+
+CANT_EMOJI: Final[str] = "🛌"
+CANT_BUTTON_LABEL: Final[str] = "Kan inte ikväll 😞"
+
+STORYTELLER_EMOJI: Final[str] = "📖"
 STORYTELLER_BUTTON_LABEL: Final[str] = "Jag vill storytella!"
+
 ROOM_MANAGEMENT_BUTTON_LABEL: Final[str] = "Rumshantering"
 ROOM_MANAGEMENT_BUTTON_EMOJI: Final[str] = "🛠️"
-ROOM_LINK_PROMPT_BUTTON_LABEL: Final[str] = "ST: Öppna rummet"
-ROOM_LINK_PROMPT_BUTTON_EMOJI: Final[str] = "🔗"
+
 ROOM_CLOSE_BUTTON_LABEL: Final[str] = "ST: Stäng rummet"
 ROOM_CLOSE_BUTTON_EMOJI: Final[str] = "🔒"
+ROOM_LINK_PROMPT_BUTTON_LABEL: Final[str] = "ST: Öppna rummet"
+ROOM_LINK_PROMPT_BUTTON_EMOJI: Final[str] = "🔗"
 ROOM_LINK_PERMISSION_DENIED_MESSAGE: Final[str] = (
     "Du behöver storyteller-rollen för att öppna eller stänga rum."
 )
 ROOM_LINK_PERMISSION_DENIED_ROLE_TEMPLATE: Final[str] = (
     "Du behöver rollen {mention} för att öppna eller stänga rum."
 )
+
 EVENT_MANAGEMENT_PERMISSION_DENIED_MESSAGE: Final[str] = (
     "Du behöver behörigheten `Hantera server` eller den konfigurerade "
     "storyteller-rollen för att skapa event och öppna eller stänga rum."
@@ -36,27 +44,24 @@ EVENT_MANAGEMENT_PERMISSION_DENIED_ROLE_TEMPLATE: Final[str] = (
     "{mention} för att skapa event och öppna eller stänga rum."
 )
 
-
 RSVP_STATUS_EMOJIS: Final[tuple[RsvpStatusEmoji, ...]] = (
     ("Available", AVAILABLE_EMOJI),
     ("Maybe", MAYBE_EMOJI),
-    ("Later", LATER_EMOJI),
-    ("Storyteller", STORYTELLER_EMOJI),
+    ("Cant", CANT_EMOJI),
 )
 RSVP_REACTION_EMOJIS: Final[tuple[str, ...]] = (
     AVAILABLE_EMOJI,
     MAYBE_EMOJI,
-    LATER_EMOJI,
+    CANT_EMOJI,
     STORYTELLER_EMOJI,
 )
 EMOJI_TO_STATUS: Final[dict[str, RsvpStatus]] = {
     emoji: status for status, emoji in RSVP_STATUS_EMOJIS
 }
-RSVP_STATUS_LABELS: Final[dict[RsvpStatus, str]] = {
+RSVP_STATUS_LABELS: Final[dict[RsvpStatus | RsvpRole, str]] = {
     "Available": "Jag vill vara med!",
     "Maybe": "Kanske",
-    "Later": "Kommer senare",
-    "Storyteller": "Jag vill storytella!",
+    "Cant": "Kan inte ikväll 😞"
 }
 
 RSVP_FOOTER_TEXT: Final[str] = (
@@ -85,6 +90,8 @@ EVENT_POST_TEMPLATE: Final[str] = (
 )
 ROOM_OPENED_MESSAGE_TEMPLATE: Final[str] = "**Rummet är öppet:** {room_url}"
 ROOM_CLOSED_MESSAGE: Final[str] = "**Rummet är nu stängt!** Tack för ikväll!"
+
+ARRIVE_LATER_MODAL_TITLE: Final[str] = "Jag kommer senare"
 
 ROOM_LINK_MODAL_TITLE: Final[str] = "Lägg till rumslänk"
 ROOM_LINK_MODAL_LABEL: Final[str] = "Rumslänk (http/https)"

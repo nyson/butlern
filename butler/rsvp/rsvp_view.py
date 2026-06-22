@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import time
+from collections.abc import Callable
 from contextlib import suppress
 from typing import ClassVar, Final
 
@@ -8,7 +11,10 @@ import discord
 
 from butler.design import (
     ARRIVE_LATER_BUTTON_LABEL,
+    ARRIVE_LATER_EMOJI,
+    ARRIVE_LATER_MODAL_TITLE,
     AVAILABLE_BUTTON_LABEL,
+    CANT_BUTTON_LABEL,
     MAYBE_BUTTON_LABEL,
     ROOM_CLOSE_BUTTON_EMOJI,
     ROOM_CLOSE_BUTTON_LABEL,
@@ -31,13 +37,11 @@ from butler.event_logic import normalize_room_url
 from butler.permissions import member_can_manage_events, permission_denied_message
 from butler.rsvp.rsvp_domain import (
     RoomSnapshot,
-    RoomState,
     RsvpResponse,
-    RsvpStatus,
     visible_room_buttons,
-    with_updated_response,
 )
 from butler.rsvp.rsvp_render import RsvpRenderState, render_rsvp_content, room_line
+from butler.rsvp.types import RoomState, RsvpStatus, ViewState
 
 
 def _build_user_mentions(user_ids: list[int]) -> str:
@@ -77,12 +81,7 @@ async def _announce_room_opening(
     availability_view: AvailabilityView,
     message_link: str,
 ) -> None:
-    statuses_to_ping: tuple[RsvpStatus, ...] = (
-        "Available",
-        "Maybe",
-        "Later",
-        "Storyteller",
-    )
+    statuses_to_ping: tuple[RsvpStatus, ...] = ("Available","Maybe")
     user_ids_to_ping: list[int] = []
     for status in statuses_to_ping:
         user_ids_to_ping.extend(await availability_view.get_user_ids_for_status(status))
@@ -108,7 +107,6 @@ async def _announce_room_opening(
                     everyone=False,
                 ),
             )
-
 
 class AvailabilityView(discord.ui.View):
     STATUSES: Final[tuple[tuple[RsvpStatus, str], ...]] = RSVP_STATUS_EMOJIS
@@ -187,18 +185,61 @@ class AvailabilityView(discord.ui.View):
             with suppress(discord.HTTPException):
                 await message.remove_reaction(emoji, user)
 
-    def _render_state(self) -> RsvpRenderState:
-        return RsvpRenderState(
+
+
+    async def _view_state(self) -> ViewState:
+        return ViewState(
             event_name=self.event_name,
-            event_description=self.event_description,
+            start_unix=self.start_unix,
+            event_url=self.event_url,
+            edition=self.edition,
             edition_emoji=self.edition_emoji,
+            edition_image_url=self.edition_image_url,
+            event_manager_role_id=self.event_manager_role_id,
+            event_description=self.event_description,
             room_state=self.room_state,
             room_url=self.room_url,
-            responses=self.responses,
         )
 
-    def build_content(self) -> str:
-        return render_rsvp_content(self._render_state())
+
+    async def _render_state(self) -> RsvpRenderState:
+        st = await self._view_state()
+
+        return RsvpRenderState(
+            event_name=st.event_name,
+            event_description=st.event_description,
+            edition_emoji=st.edition_emoji,
+            room_state=st.room_state,
+            room_url=(st.room_state == "open" and st.room_url) or None,
+            responses=await self._all_responses(),
+        )
+
+    async def _all_responses(self) -> dict[int, RsvpResponse]:
+        return self.responses
+
+    def _get_response_or_default(self, user_id: int) -> RsvpResponse:
+        return self.responses.get(user_id) \
+            or RsvpResponse(role="Player", status="Available", arrival_time=None)
+
+    async def _update_response(self, user_id: int, response: RsvpResponse | None) -> None:
+        if response is None:
+            if user_id in self.responses:
+                updated = dict(self.responses)
+                updated.pop(user_id)
+                self.responses = updated
+        else:
+            self.responses[user_id] = response
+
+    async def with_response_or_default(
+            self,
+            user_id: int,
+            fn: Callable[[RsvpResponse], RsvpResponse]
+        ) -> None:
+        async with self._lock:
+            await self._update_response(user_id, fn(self._get_response_or_default(user_id)))
+
+    async def build_content(self) -> str:
+        return render_rsvp_content(await self._render_state())
 
     def build_embed(self) -> discord.Embed | None:
         return None
@@ -212,6 +253,18 @@ class AvailabilityView(discord.ui.View):
             event_manager_role_id=self.event_manager_role_id,
         )
 
+    async def toggle_storyteller(
+        self,
+        *,
+        user_id: int,
+    ) -> None:
+        await self.with_response_or_default(user_id, lambda current: RsvpResponse(
+            role="Player" if current.role == "Storyteller" else "Storyteller",
+            status=(current and current.status != "Cant" and current.status)\
+                or "Available",
+            arrival_time=(current and current.arrival_time) or None,
+        ))
+
     async def set_user_response(
         self,
         *,
@@ -219,20 +272,14 @@ class AvailabilityView(discord.ui.View):
         status: RsvpStatus,
         arrival_time: str | None = None,
     ) -> None:
-        async with self._lock:
-            self.responses = with_updated_response(
-                self.responses,
-                user_id=user_id,
-                status=status,
-                arrival_time=arrival_time,
-            )
+        await self.with_response_or_default(user_id, lambda current: RsvpResponse(
+            role=current.role,
+            status=status,
+            arrival_time=arrival_time,
+        ))
 
     async def remove_user_response(self, user_id: int) -> None:
-        async with self._lock:
-            if user_id in self.responses:
-                updated = dict(self.responses)
-                updated.pop(user_id)
-                self.responses = updated
+        await self._update_response(user_id, None)
 
     async def set_room_url(self, room_url: str | None) -> None:
         async with self._lock:
@@ -252,12 +299,33 @@ class AvailabilityView(discord.ui.View):
         async with self._lock:
             return [
                 user_id
-                for user_id, response in self.responses.items()
+                for user_id, response in (await self._all_responses()).items()
                 if response.status == status
             ]
+    async def rebuild(self, interaction: discord.Interaction) -> None:
+        if interaction.message is None:
+            print("no interaction")
+            return
+
+        try:
+            await interaction.message.edit(
+                content=await self.build_content(),
+                embed=self.build_embed(),
+                view=self,
+            )
+        except discord.HTTPException:
+            return
 
 
-    async def _record_interaction_response(
+    async def _record_storyteller_toggle(
+            self,
+            interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=False)
+        await self.toggle_storyteller(user_id=interaction.user.id)
+
+        await self.rebuild(interaction)
+
+    async def _record_availability(
         self,
         interaction: discord.Interaction,
         status: RsvpStatus,
@@ -265,29 +333,21 @@ class AvailabilityView(discord.ui.View):
         arrival_time: str | None = None,
     ) -> None:
         await interaction.response.defer(ephemeral=True, thinking=False)
-        await self.set_user_response(
-            user_id=interaction.user.id,
+        await self.with_response_or_default(interaction.user.id, lambda current: RsvpResponse(
+            role=(status == "Cant" and "Player") or current.role,
             status=status,
-            arrival_time=arrival_time,
-        )
+            arrival_time=(status == "Cant" and None) or arrival_time,
+        ))
+
         if interaction.message is None:
             return
+
         await self._remove_other_rsvp_reactions_for_user(
             message=interaction.message,
             user=interaction.user,
-            selected_status=status,
-        )
-        try:
-            await interaction.message.edit(
-                content=self.build_content(),
-                embed=self.build_embed(),
-                view=self,
-            )
-        except discord.HTTPException:
-            return
+            selected_status=status)
 
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return True
+        await self.rebuild(interaction)
 
     @discord.ui.button(
         label=AVAILABLE_BUTTON_LABEL,
@@ -300,7 +360,7 @@ class AvailabilityView(discord.ui.View):
         interaction: discord.Interaction,
         _: discord.ui.Button[AvailabilityView],
     ) -> None:
-        await self._record_interaction_response(interaction, "Available")
+        await self._record_availability(interaction, "Available")
 
     @discord.ui.button(
         label=MAYBE_BUTTON_LABEL,
@@ -313,39 +373,52 @@ class AvailabilityView(discord.ui.View):
         interaction: discord.Interaction,
         _: discord.ui.Button[AvailabilityView],
     ) -> None:
-        await self._record_interaction_response(interaction, "Maybe")
+        await self._record_availability(interaction, "Maybe")
 
     @discord.ui.button(
-        label=ARRIVE_LATER_BUTTON_LABEL,
-        style=discord.ButtonStyle.primary,
+        label=CANT_BUTTON_LABEL,
+        style=discord.ButtonStyle.secondary,
         emoji=RSVP_STATUS_EMOJIS[2][1],
         row=0,
     )
-    async def arrive_later(
+    async def cant(
         self,
         interaction: discord.Interaction,
         _: discord.ui.Button[AvailabilityView],
     ) -> None:
-        await self._record_interaction_response(interaction, "Later")
+        await self._record_availability(interaction, "Cant")
+
+    @discord.ui.button(
+        label=ARRIVE_LATER_BUTTON_LABEL,
+        style=discord.ButtonStyle.secondary,
+        emoji=ARRIVE_LATER_EMOJI,
+        row=1
+    )
+    async def later(
+        self,
+        interaction: discord.Interaction,
+        _: discord.ui.Button[AvailabilityView]
+    ) -> None:
+        await interaction.response.send_modal(ArrivingLaterModal(self))
 
     @discord.ui.button(
         label=STORYTELLER_BUTTON_LABEL,
         style=discord.ButtonStyle.secondary,
         emoji=STORYTELLER_EMOJI,
-        row=0,
+        row=1,
     )
     async def storyteller(
         self,
         interaction: discord.Interaction,
         _: discord.ui.Button[AvailabilityView],
     ) -> None:
-        await self._record_interaction_response(interaction, "Storyteller")
+        await self._record_storyteller_toggle(interaction)
 
     @discord.ui.button(
         label=ROOM_LINK_PROMPT_BUTTON_LABEL,
         style=discord.ButtonStyle.secondary,
         emoji=ROOM_LINK_PROMPT_BUTTON_EMOJI,
-        row=1,
+        row=2,
     )
     async def prompt_room_link(
         self,
@@ -386,17 +459,7 @@ class AvailabilityView(discord.ui.View):
 
         await interaction.response.defer(ephemeral=True, thinking=False)
         await self.close_room()
-        if interaction.message is None:
-            return
-        try:
-            await interaction.message.edit(
-                content=self.build_content(),
-                embed=self.build_embed(),
-                view=self,
-            )
-        except discord.HTTPException:
-            return
-
+        await self.rebuild(interaction)
 
 class RoomManagementView(discord.ui.View):
     def __init__(
@@ -464,7 +527,7 @@ class RoomManagementView(discord.ui.View):
             return
         try:
             await self._rsvp_message.edit(
-                content=self.availability_view.build_content(),
+                content=await self.availability_view.build_content(),
                 embed=self.availability_view.build_embed(),
                 view=self.availability_view,
             )
@@ -543,7 +606,6 @@ class RoomManagementView(discord.ui.View):
         await self.availability_view.close_room()
         await self.refresh_messages(interaction)
 
-
 class RoomManagementRoomLinkModal(discord.ui.Modal, title=ROOM_LINK_MODAL_TITLE):
     room_link: ClassVar[discord.ui.TextInput[RoomManagementRoomLinkModal]] = discord.ui.TextInput(
         label=ROOM_LINK_MODAL_LABEL,
@@ -588,8 +650,52 @@ class RoomManagementRoomLinkModal(discord.ui.Modal, title=ROOM_LINK_MODAL_TITLE)
             message_link=self.management_view.resolve_rsvp_message_link(interaction),
         )
 
+class ArrivingLaterModal(discord.ui.Modal, title=ARRIVE_LATER_MODAL_TITLE):
+    arriving_later_hours: ClassVar[discord.ui.TextInput[ArrivingLaterModal]] = discord.ui.TextInput(
+        label=ARRIVE_LATER_MODAL_TITLE,
+        placeholder="19:00",
+        max_length=10
+    )
+    def __init__(self, view: AvailabilityView):
+        super().__init__()
+        self.view = view
+
+    def _parse_time(self, time_str: str) -> str | None:
+        parsed = None
+
+        with contextlib.suppress(ValueError):
+            parsed = time.strptime(time_str, "%H:%M")
+        with contextlib.suppress(ValueError):
+            parsed = time.strptime(time_str, "%H%M")
+
+        if not parsed:
+            return None
+        return time.strftime("%H:%M", parsed)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        arrival_time = self._parse_time(self.arriving_later_hours.value)
+
+        if arrival_time is None:
+            await interaction.response.send_message(
+                "Du måste skriva in tiden i formatet HH:MM, exempelvis 19:30!",
+                ephemeral=True,
+            )
+
+        await self.view.with_response_or_default(
+            interaction.user.id,
+            lambda current: RsvpResponse(
+                role=current.role,
+                status=(current.status == "Cant" and "Available") or current.status,
+                arrival_time=arrival_time))
+
+        if interaction.message is not None:
+            await self.view.rebuild(interaction)
+            await interaction.response.defer(ephemeral=True, thinking=False)
+
+
 
 class RoomLinkModal(discord.ui.Modal, title=ROOM_LINK_MODAL_TITLE):
+    """Modal for opening rooms"""
     room_link: ClassVar[discord.ui.TextInput[RoomLinkModal]] = discord.ui.TextInput(
         label=ROOM_LINK_MODAL_LABEL,
         placeholder=ROOM_LINK_MODAL_PLACEHOLDER,
@@ -627,15 +733,7 @@ class RoomLinkModal(discord.ui.Modal, title=ROOM_LINK_MODAL_TITLE):
         await self.view.set_room_url(normalized_room_url)
 
         if interaction.message is not None:
-            try:
-                await interaction.message.edit(
-                    content=self.view.build_content(),
-                    embed=self.view.build_embed(),
-                    view=self.view,
-                )
-            except discord.HTTPException:
-                print("Failed to update RSVP message after room-link modal submit.")
-                return
+            await self.view.rebuild(interaction)
         if interaction.message is None:
             print("Room-open announcement skipped: interaction message missing.")
             return
@@ -643,8 +741,6 @@ class RoomLinkModal(discord.ui.Modal, title=ROOM_LINK_MODAL_TITLE):
         statuses_to_ping: tuple[RsvpStatus, ...] = (
             "Available",
             "Maybe",
-            "Later",
-            "Storyteller",
         )
         user_ids_to_ping: list[int] = []
         for status in statuses_to_ping:

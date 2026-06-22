@@ -72,7 +72,7 @@ def status_sections(responses: dict[int, RsvpResponse]) -> str:
         count = status_count(responses, status)
         display_label = RSVP_STATUS_LABELS[status]
         mentions = mentions_for_status(responses, status) or ""
-        sections.append(f"{emoji} **{display_label} ({count})**\n{mentions}")
+        sections.append(f"{emoji}  **{display_label} ({count})**\n{mentions}")
     return "\n\n".join(sections)
 
 

@@ -8,9 +8,9 @@ The room-state machine (`RoomSnapshot`, `visible_room_buttons`) is covered in
 from __future__ import annotations
 
 from butler.design import (
+    ARRIVE_LATER_EMOJI,
     AVAILABLE_EMOJI,
     EMOJI_TO_STATUS,
-    LATER_EMOJI,
     MAYBE_EMOJI,
     STORYTELLER_EMOJI,
 )
@@ -100,7 +100,7 @@ def test_mentions_for_status_truncates_past_fifteen() -> None:
 def test_status_from_emoji_maps_each_emoji() -> None:
     assert status_from_emoji(AVAILABLE_EMOJI, EMOJI_TO_STATUS) == "Available"
     assert status_from_emoji(MAYBE_EMOJI, EMOJI_TO_STATUS) == "Maybe"
-    assert status_from_emoji(LATER_EMOJI, EMOJI_TO_STATUS) == "Later"
+    assert status_from_emoji(ARRIVE_LATER_EMOJI, EMOJI_TO_STATUS) == "Later"
 
 
 def test_status_from_emoji_unknown_is_available() -> None:
@@ -112,12 +112,12 @@ def test_status_from_emoji_unknown_is_available() -> None:
 
 
 def test_status_from_emojis_precedence_maybe_wins() -> None:
-    emojis = [LATER_EMOJI, MAYBE_EMOJI, STORYTELLER_EMOJI, AVAILABLE_EMOJI]
+    emojis = [ARRIVE_LATER_EMOJI, MAYBE_EMOJI, STORYTELLER_EMOJI, AVAILABLE_EMOJI]
     assert status_from_emojis(emojis, EMOJI_TO_STATUS) == "Maybe"
 
 
 def test_status_from_emojis_precedence_later_over_storyteller() -> None:
-    assert status_from_emojis([STORYTELLER_EMOJI, LATER_EMOJI], EMOJI_TO_STATUS) == "Later"
+    assert status_from_emojis([STORYTELLER_EMOJI, ARRIVE_LATER_EMOJI], EMOJI_TO_STATUS) == "Later"
 
 
 # def test_status_from_emojis_precedence_storyteller_over_available() -> None:

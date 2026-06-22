@@ -6,9 +6,9 @@ from butler.rsvp.types import RsvpRole, RsvpStatus
 
 RsvpStatusEmoji = tuple[RsvpStatus, str]
 
-AVAILABLE_EMOJI: Final[str] = "✅"
+AVAILABLE_EMOJI: Final[str] = "🪓"
 MAYBE_EMOJI: Final[str] = "🤔"
-LATER_EMOJI: Final[str] = "🕒"
+ARRIVE_LATER_EMOJI: Final[str] = "🕒"
 STORYTELLER_EMOJI: Final[str] = "😈"
 
 AVAILABLE_BUTTON_LABEL: Final[str] = "Jag vill vara med!"
@@ -45,7 +45,7 @@ RSVP_STATUS_EMOJIS: Final[tuple[RsvpStatusEmoji, ...]] = (
 RSVP_REACTION_EMOJIS: Final[tuple[str, ...]] = (
     AVAILABLE_EMOJI,
     MAYBE_EMOJI,
-    LATER_EMOJI,
+    ARRIVE_LATER_EMOJI,
     STORYTELLER_EMOJI,
 )
 EMOJI_TO_STATUS: Final[dict[str, RsvpStatus]] = {

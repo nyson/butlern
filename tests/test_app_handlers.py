@@ -262,7 +262,7 @@ def _reaction_view() -> MagicMock:
     view = MagicMock()
     view.set_user_response = AsyncMock()
     view.remove_user_response = AsyncMock()
-    view.build_content = MagicMock(return_value="content")
+    view.build_content = AsyncMock(return_value="content")
     view.build_embed = MagicMock(return_value=None)
     return view
 
@@ -293,7 +293,9 @@ async def test_reaction_add_records_status(
     )
 
     await app.on_raw_reaction_add(payload)
-    view.set_user_response.assert_awaited_once_with(user_id=2, status="Available")
+    view.set_user_response.assert_awaited_once_with(
+        user_id=2,
+        status="Available")
 
 
 async def test_reaction_remove_resolves_status(

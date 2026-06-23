@@ -663,14 +663,12 @@ class ArrivingLaterModal(discord.ui.Modal, title=ARRIVE_LATER_MODAL_TITLE):
     def _parse_time(self, time_str: str) -> str | None:
         parsed = None
 
-        with contextlib.suppress(ValueError):
-            parsed = time.strptime(time_str, "%H:%M")
-        with contextlib.suppress(ValueError):
-            parsed = time.strptime(time_str, "%H%M")
+        for fmt in ("%H:%M", "%H%M", "%H.%M", "%H %M"):
+            with contextlib.suppress(ValueError):
+                parsed = time.strptime(time_str, fmt)
+                break
 
-        if not parsed:
-            return None
-        return time.strftime("%H:%M", parsed)
+        return parsed and time.strftime("%H:%M", parsed)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         arrival_time = self._parse_time(self.arriving_later_hours.value)

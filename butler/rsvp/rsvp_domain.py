@@ -45,13 +45,6 @@ def visible_room_buttons(room_state: RoomState) -> frozenset[RoomButton]:
     return frozenset({"open_or_prompt"})
 
 
-@dataclass(frozen=True)
-class RsvpResponse:
-    status: RsvpStatus
-    role: RsvpRole = "Player"
-    arrival_time: str | None = None
-
-
 def status_from_emoji(emoji: str, emoji_to_status: Mapping[str, RsvpStatus]) -> RsvpStatus:
     """Map a single reaction emoji to a status. Unrecognized emojis count as `Available`."""
     return emoji_to_status.get(emoji, "Available")

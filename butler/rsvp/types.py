@@ -18,5 +18,12 @@ class ViewState:
     room_state: RoomState
     room_url: str | None
     edition_image_url: str | None
-    event_manager_role_id: int | None
     event_description: str
+
+@dataclass(frozen=True)
+class RsvpResponse:
+    user: int
+    status: RsvpStatus
+    role: RsvpRole = "Player"
+    arrival_time: str | None = None
+

@@ -7,12 +7,13 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from butler.DEPRECATED import ACTIVE_RSVP_VIEWS
 from butler.config import load_config
 from butler.constants import (
     DEFAULT_EVENT_DURATION,
     DEFAULT_EVENT_LOCATION,
     DEFAULT_EVENT_START_TIME,
-    SETTINGS_PATH,
+    PERSISTANCE_PATH,
 )
 from butler.design import (
     DESIGN_PREVIEW_DEFAULT_DESCRIPTION,
@@ -40,13 +41,16 @@ from butler.permissions import (
     permission_denied_message,
 )
 from butler.rsvp.rsvp_domain import status_from_emoji, status_from_emojis
-from butler.rsvp.rsvp_view import AvailabilityView
+from butler.rsvp.AvailabilityView import AvailabilityView
+from butler.rsvp.rsvp_store import RsvpMessageStore
+from butler.rsvp.types import ViewState
 from butler.settings_store import GuildSettingsStore
 
 CONFIG = load_config()
 _force_guild_sync = False
-SETTINGS_STORE = GuildSettingsStore.load(SETTINGS_PATH)
-ACTIVE_RSVP_VIEWS: dict[int, AvailabilityView] = {}
+SETTINGS_STORE = GuildSettingsStore.load(PERSISTANCE_PATH)
+RSVP_MESSAGE_STORE = RsvpMessageStore.load(PERSISTANCE_PATH)
+
 BOTC_EDITIONS: Final[tuple[str, ...]] = (
     "Trouble Brewing",
     "Bad Moon Rising",
@@ -104,8 +108,6 @@ def _event_management_permission_denied_message(
         without_role=EVENT_MANAGEMENT_PERMISSION_DENIED_MESSAGE,
         with_role_template=EVENT_MANAGEMENT_PERMISSION_DENIED_ROLE_TEMPLATE,
     )
-
-
 
 async def _user_has_reaction(
     reaction: discord.Reaction,
@@ -299,7 +301,7 @@ async def _post_rsvp_message(
             await event_channel.send(content=event_link_message)
 
         embed = view.build_embed()
-        content = await view.build_content()
+        content = await view.build_content(interaction)
 
         if embed is None:
             return await event_channel.send(
@@ -604,12 +606,12 @@ async def event(
         await interaction.followup.send(str(exc), ephemeral=True)
         return
 
-    can_create_event = await _ensure_event_creation_permissions(
+    
+    if not await _ensure_event_creation_permissions(
         interaction=interaction,
         guild=guild,
         event_channel=event_channel,
-    )
-    if not can_create_event:
+    ):
         return
 
     event = await _create_scheduled_event(
@@ -626,17 +628,21 @@ async def event(
         guild=guild,
         edition=selected_edition,
     )
-    view = AvailabilityView(
+
+    viewState = ViewState(
         event_name=event.name,
         start_unix=int(event_input.start_utc.timestamp()),
         event_url=event_url,
-        room_url=event_input.room_url,
         edition=selected_edition,
         edition_emoji=selected_edition_emoji,
+        room_state="pending",
+        room_url=event_input.room_url,
         edition_image_url=selected_edition_image_url,
-        event_manager_role_id=event_manager_role_id,
         event_description=event_input.description,
     )
+
+    view = AvailabilityView(view_state=viewState, settings_store=SETTINGS_STORE, view_store=)
+
     rsvp_message = await _post_rsvp_message(
         interaction=interaction,
         event_channel=event_channel,
@@ -738,23 +744,24 @@ async def previeweventdesign(
         guild_id=guild.id,
         channel_id=event_channel.id,
     )
-    event_manager_role_id = _configured_event_manager_role_id(guild.id)
     selected_edition = edition.value if edition is not None else "Custom"
     selected_edition_emoji, selected_edition_image_url = _resolve_edition_media(
         guild=guild,
         edition=selected_edition,
     )
-    view = AvailabilityView(
+    view_state = ViewState(
         event_name=preview_input.title,
         start_unix=int(preview_input.start_utc.timestamp()),
         event_url=preview_event_url,
+        room_state="pending",
         room_url=preview_input.room_url,
         edition=selected_edition,
         edition_emoji=selected_edition_emoji,
         edition_image_url=selected_edition_image_url,
-        event_manager_role_id=event_manager_role_id,
-        event_description=preview_input.description,
-    )
+        event_description=preview_input.description)
+    
+    view = AvailabilityView(view_state=view_state, settings_store=SETTINGS_STORE)
+    
     preview_message = await _post_rsvp_message(
         interaction=interaction,
         event_channel=event_channel,

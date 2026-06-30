@@ -15,7 +15,7 @@ def _path_from_env(env_var: str, *, default_path: Path) -> Path:
     return Path(configured_path)
 
 
-SETTINGS_PATH: Final[Path] = _path_from_env(
+PERSISTANCE_PATH: Final[Path] = _path_from_env(
     "BUTLER_DB_PATH",
     default_path=PROJECT_ROOT / "butler_state.db",
 )

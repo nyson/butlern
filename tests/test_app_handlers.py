@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+import butler.DEPRECATED
 import butler.app as app
 from butler.design import AVAILABLE_EMOJI, CANT_EMOJI
 from tests.discord_mocks import (
@@ -49,18 +50,21 @@ def store() -> Iterator[MagicMock]:
 def views() -> Iterator[dict[int, object]]:
     """Give the handler a fresh ACTIVE_RSVP_VIEWS registry."""
     fresh: dict[int, object] = {}
-    original = app.ACTIVE_RSVP_VIEWS
-    app.ACTIVE_RSVP_VIEWS = fresh  # type: ignore[assignment]
+    original = butler.DEPRECATED.ACTIVE_RSVP_VIEWS
+    butler.DEPRECATED.ACTIVE_RSVP_VIEWS = fresh  # type: ignore[assignment]
     try:
         yield fresh
     finally:
-        app.ACTIVE_RSVP_VIEWS = original
+        butler.DEPRECATED.ACTIVE_RSVP_VIEWS = original
 
 
 @pytest.fixture
 def bot_member_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     """Patch get_bot_member to return a fully-permissioned bot member."""
-    monkeypatch.setattr(app, "get_bot_member", lambda guild, user: make_member(member_id=2))
+    monkeypatch.setattr(
+        app,
+        "get_bot_member", 
+        lambda guild, user: make_member(member_id=2))  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
 
 
 # --- /seteventchannel -------------------------------------------------------
@@ -80,7 +84,7 @@ async def test_seteventchannel_rejects_cross_guild_channel() -> None:
 
 
 async def test_seteventchannel_missing_bot_member(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(app, "get_bot_member", lambda guild, user: None)
+    monkeypatch.setattr(app, "get_bot_member", lambda guild, user: None) # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     ix = make_interaction(guild=make_guild(guild_id=1))
     await invoke(app.seteventchannel, ix.interaction, make_text_channel(guild_id=1))
     assert "couldn't verify my server permissions" in sent_text(ix.response.send_message)
@@ -196,7 +200,7 @@ async def test_event_missing_bot_permissions(
     monkeypatch.setattr(
         app,
         "get_bot_member",
-        lambda guild, user: make_member(permissions=make_permissions(create_events=False)),
+        lambda guild, user: make_member(permissions=make_permissions(create_events=False)), # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
     )
     channel = make_text_channel(channel_id=10, guild_id=1)
     ix = make_interaction(guild=make_guild(guild_id=1, channel=channel), user=make_member())
@@ -207,7 +211,7 @@ async def test_event_missing_bot_permissions(
 async def test_event_success_registers_view(
     store: MagicMock, views: dict[int, object], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(app, "get_bot_member", lambda guild, user: make_member(member_id=2))
+    monkeypatch.setattr(app, "get_bot_member", lambda guild, user: make_member(member_id=2)) # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
     channel = make_text_channel(channel_id=10, guild_id=1)
     guild = make_guild(guild_id=1, channel=channel)
     ix = make_interaction(guild=guild, user=make_member())
@@ -230,7 +234,7 @@ async def test_previeweventdesign_requires_guild() -> None:
 async def test_previeweventdesign_success_posts_without_event(
     store: MagicMock, views: dict[int, object], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(app, "get_bot_member", lambda guild, user: make_member(member_id=2))
+    monkeypatch.setattr(app, "get_bot_member", lambda guild, user: make_member(member_id=2))  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
     channel = make_text_channel(channel_id=10, guild_id=1)
     guild = make_guild(guild_id=1, channel=channel)
     ix = make_interaction(guild=guild, user=make_member())

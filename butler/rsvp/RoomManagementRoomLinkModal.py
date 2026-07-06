@@ -1,39 +1,40 @@
-import butler.design
-from butler.event_logic import normalize_room_url
-from butler.rsvp.AvailabilityView import can_manage_room_action
-from butler.rsvp.RoomManagementView import RoomManagementView
-from butler.rsvp.AvailabilityView import announce_room_opening
-
-
-import discord
-
+from __future__ import annotations
 
 from typing import ClassVar
 
-from butler.settings_store import GuildSettingsStore
+import discord
+
+from butler.design import (
+    ROOM_LINK_MODAL_INVALID_MESSAGE,
+    ROOM_LINK_MODAL_LABEL,
+    ROOM_LINK_MODAL_MAX_LENGTH,
+    ROOM_LINK_MODAL_PLACEHOLDER,
+    ROOM_LINK_MODAL_TITLE,
+)
+from butler.event_logic import normalize_room_url
+from butler.rsvp.RoomManagementView import RoomManagementView
+from butler.rsvp.view_helpers import announce_room_opening, can_manage_room_action
 
 
-class RoomManagementRoomLinkModal(discord.ui.Modal, title=butler.design.ROOM_LINK_MODAL_TITLE):
-    room_link: ClassVar[discord.ui.TextInput[RoomManagementRoomLinkModal]] = discord.ui.TextInput(
-        label=butler.design.ROOM_LINK_MODAL_LABEL,
-        placeholder=butler.design.ROOM_LINK_MODAL_PLACEHOLDER,
-        max_length=butler.design.ROOM_LINK_MODAL_MAX_LENGTH,
+class RoomManagementRoomLinkModal(discord.ui.Modal, title=ROOM_LINK_MODAL_TITLE):
+    room_link: ClassVar[
+        discord.ui.TextInput[RoomManagementRoomLinkModal]
+    ] = discord.ui.TextInput(
+        label=ROOM_LINK_MODAL_LABEL,
+        placeholder=ROOM_LINK_MODAL_PLACEHOLDER,
+        max_length=ROOM_LINK_MODAL_MAX_LENGTH,
     )
 
-    def __init__(self, management_view: RoomManagementView, settings_store: GuildSettingsStore) -> None:
+    def __init__(self, management_view: RoomManagementView) -> None:
         super().__init__()
         self.management_view = management_view
-        self.settings_store = settings_store
-
-    def event_manager_role(self, interaction: discord.Interaction) -> int | None:
-        return (interaction.guild
-            and self.settings_store.get_event_manager_role_id(interaction.guild.id)
-            or None)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         if not can_manage_room_action(
             interaction,
-            event_manager_role_id=self.event_manager_role(interaction),
+            event_manager_role_id=self.management_view.availability_view.event_manager_role(
+                interaction
+            ),
         ):
             await interaction.response.send_message(
                 self.management_view.permission_denied_message(interaction),
@@ -49,7 +50,7 @@ class RoomManagementRoomLinkModal(discord.ui.Modal, title=butler.design.ROOM_LIN
 
         if normalized_room_url is None:
             await interaction.response.send_message(
-                butler.design.ROOM_LINK_MODAL_INVALID_MESSAGE,
+                ROOM_LINK_MODAL_INVALID_MESSAGE,
                 ephemeral=True,
             )
             return

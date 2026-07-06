@@ -1,59 +1,36 @@
-from ctypes import ArgumentError
-
-from discord import user
-
-import butler.design
-from butler.permissions import member_can_manage_events, permission_denied_message
-from butler.rsvp.ArrivingLaterModal import ArrivingLaterModal
-from butler.rsvp.RoomLinkModal import RoomLinkModal
-from butler.rsvp.rsvp_domain import RoomSnapshot, visible_room_buttons
-from butler.rsvp.rsvp_render import RsvpRenderState, render_rsvp_content
-from butler.rsvp.rsvp_store import RsvpMessageStore
-from butler.rsvp.types import RsvpResponse, RsvpStatus, ViewState
-
-
-import discord
-
+from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
 from contextlib import suppress
 from typing import Final
 
+import discord
+
+from butler.design import (
+    ARRIVE_LATER_BUTTON_LABEL,
+    ARRIVE_LATER_EMOJI,
+    AVAILABLE_BUTTON_LABEL,
+    CANT_BUTTON_LABEL,
+    MAYBE_BUTTON_LABEL,
+    ROOM_CLOSE_BUTTON_EMOJI,
+    ROOM_CLOSE_BUTTON_LABEL,
+    ROOM_LINK_PROMPT_BUTTON_EMOJI,
+    ROOM_LINK_PROMPT_BUTTON_LABEL,
+    RSVP_STATUS_EMOJIS,
+    STORYTELLER_BUTTON_LABEL,
+    STORYTELLER_EMOJI,
+)
+from butler.rsvp.rsvp_domain import RoomSnapshot, RsvpResponse, visible_room_buttons
+from butler.rsvp.rsvp_render import RsvpRenderState, render_rsvp_content
+from butler.rsvp.rsvp_store import RsvpMessageStore
+from butler.rsvp.types import RsvpStatus, ViewState
+from butler.rsvp.view_helpers import can_manage_room_action, room_permission_denied_message
 from butler.settings_store import GuildSettingsStore
 
 
-def can_manage_room_action(
-    interaction: discord.Interaction,
-    *,
-    event_manager_role_id: int | None,
-) -> bool:
-    user = interaction.user
-    if not isinstance(user, discord.Member):
-        return False
-    return member_can_manage_events(user, event_manager_role_id=event_manager_role_id)
-
-
-def room_permission_denied_message(
-    interaction: discord.Interaction,
-    *,
-    event_manager_role_id: int | None,
-) -> str:
-    guild = interaction.guild
-    role = (
-        guild.get_role(event_manager_role_id)
-        if guild is not None and event_manager_role_id is not None
-        else None
-    )
-    return permission_denied_message(
-        role_mention=role.mention if role is not None else None,
-        without_role=butler.design.ROOM_LINK_PERMISSION_DENIED_MESSAGE,
-        with_role_template=butler.design.ROOM_LINK_PERMISSION_DENIED_ROLE_TEMPLATE,
-    )
-
-
 class AvailabilityView(discord.ui.View):
-    STATUSES: Final[tuple[tuple[RsvpStatus, str], ...]] = butler.design.RSVP_STATUS_EMOJIS
+    STATUSES: Final[tuple[tuple[RsvpStatus, str], ...]] = RSVP_STATUS_EMOJIS
 
     def __init__(
         self,
@@ -61,15 +38,63 @@ class AvailabilityView(discord.ui.View):
         view_state: ViewState,
         settings_store: GuildSettingsStore,
         view_store: RsvpMessageStore,
+        message_id: int | None = None,
+        channel_id: int | None = None,
+        guild_id: int | None = None,
         timeout: float | None = None,
     ) -> None:
         super().__init__(timeout=timeout)
         self.view_state = view_state
-        self._lock = asyncio.Lock()
-        # self.responses: dict[int, RsvpResponse] = {}
-        self._sync_room_action_buttons()
         self.settings_store = settings_store
         self.view_store = view_store
+        self.message_id = message_id
+        self.channel_id = channel_id
+        self.guild_id = guild_id
+        self._ephemeral_responses: dict[int, RsvpResponse] = {}
+        self._lock = asyncio.Lock()
+        self._sync_room_action_buttons()
+
+    def bind_message_context(
+        self,
+        *,
+        message_id: int,
+        channel_id: int,
+        guild_id: int,
+    ) -> None:
+        self.message_id = message_id
+        self.channel_id = channel_id
+        self.guild_id = guild_id
+        self.view_store.upsert_message(
+            message_id=message_id,
+            channel_id=channel_id,
+            guild_id=guild_id,
+            view_state=self.view_state,
+        )
+        if self._ephemeral_responses:
+            for user_id, response in self._ephemeral_responses.items():
+                self.view_store.upsert_rsvp_response(
+                    message_id=message_id,
+                    user_id=user_id,
+                    response=response,
+                )
+            self._ephemeral_responses.clear()
+
+    def _persist_view_state(self) -> None:
+        if self.message_id is None or self.channel_id is None or self.guild_id is None:
+            return
+        self.view_store.upsert_message(
+            message_id=self.message_id,
+            channel_id=self.channel_id,
+            guild_id=self.guild_id,
+            view_state=self.view_state,
+        )
+
+    def event_manager_role(self, interaction: discord.Interaction) -> int | None:
+        if interaction.guild is not None:
+            return self.settings_store.get_event_manager_role_id(interaction.guild.id)
+        if self.guild_id is not None:
+            return self.settings_store.get_event_manager_role_id(self.guild_id)
+        return None
 
     def _set_button_visibility(
         self,
@@ -116,48 +141,74 @@ class AvailabilityView(discord.ui.View):
             with suppress(discord.HTTPException):
                 await message.remove_reaction(emoji, user)
 
-    async def _render_state(self, interaction: discord.Interaction) -> RsvpRenderState:
-        message = interaction.message
-        if not message:
-            raise ArgumentError(f"_render_state; Expected a message!")
+    async def _all_responses(self) -> dict[int, RsvpResponse]:
+        if self.message_id is None:
+            return dict(self._ephemeral_responses)
+        try:
+            return self.view_store.all_responses(self.message_id)
+        except OSError:
+            return dict(self._ephemeral_responses)
 
+    def _get_response_or_default(self, user_id: int) -> RsvpResponse:
+        if self.message_id is None:
+            return self._ephemeral_responses.get(user_id) or RsvpResponse(
+                role="Player",
+                status="Available",
+                arrival_time=None,
+            )
+        try:
+            existing = self.view_store.get_rsvp_response(self.message_id, user_id)
+        except OSError:
+            existing = self._ephemeral_responses.get(user_id)
+        return existing or RsvpResponse(role="Player", status="Available", arrival_time=None)
+
+    async def _update_response(self, user_id: int, response: RsvpResponse | None) -> None:
+        if self.message_id is None:
+            if response is None:
+                self._ephemeral_responses.pop(user_id, None)
+            else:
+                self._ephemeral_responses[user_id] = response
+            return
+        try:
+            if response is None:
+                self.view_store.remove_rsvp_response(message_id=self.message_id, user_id=user_id)
+                self._ephemeral_responses.pop(user_id, None)
+                return
+            self.view_store.upsert_rsvp_response(
+                message_id=self.message_id,
+                user_id=user_id,
+                response=response,
+            )
+            self._ephemeral_responses.pop(user_id, None)
+        except OSError:
+            if response is None:
+                self._ephemeral_responses.pop(user_id, None)
+            else:
+                self._ephemeral_responses[user_id] = response
+
+    async def _render_state(self) -> RsvpRenderState:
         return RsvpRenderState(
             event_name=self.view_state.event_name,
             event_description=self.view_state.event_description,
             edition_emoji=self.view_state.edition_emoji,
             room_state=self.view_state.room_state,
-            room_url=(self.view_state.room_state == "open" and self.view_state.room_url) or None,
-            responses=await self._all_responses(message.id),
+            room_url=(
+                self.view_state.room_state == "open" and self.view_state.room_url
+            )
+            or None,
+            responses=await self._all_responses(),
         )
 
-    async def _all_responses(self, message_id: int) -> dict[int, RsvpResponse]:
-        d = { r.user: r for r in self.view_store.all_responses(message_id)}
-        return d
-
-    def _default_rspv_response(self, user_id: int) -> RsvpResponse:
-        return RsvpResponse(
-            user=user_id,
-            status="Available",
-            role="Player",
-            arrival_time=None)
-
-    def _get_response_or_default(self, message_id: int, user_id: int) -> RsvpResponse:
-        return self.view_store.get_rsvp_response(message_id, user_id) \
-            or self.view_store.add_rsvp_response(
-                message_id, 
-                self._default_rspv_response(user_id))
-        
-
     async def with_response_or_default(
-            self,
-            user_id: int,
-            fn: Callable[[RsvpResponse], RsvpResponse]
-        ) -> None:
+        self,
+        user_id: int,
+        fn: Callable[[RsvpResponse], RsvpResponse],
+    ) -> None:
         async with self._lock:
             await self._update_response(user_id, fn(self._get_response_or_default(user_id)))
 
-    async def build_content(self, interaction: discord.Interaction) -> str:
-        return render_rsvp_content(await self._render_state(interaction))
+    async def build_content(self) -> str:
+        return render_rsvp_content(await self._render_state())
 
     def build_embed(self) -> discord.Embed | None:
         return None
@@ -168,21 +219,40 @@ class AvailabilityView(discord.ui.View):
     ) -> str:
         return room_permission_denied_message(
             interaction,
-            event_manager_role_id=interaction.guild
-                and self.settings_store.get_event_manager_role_id(interaction.guild.id)
-                or None)
+            event_manager_role_id=self.event_manager_role(interaction),
+        )
 
     async def toggle_storyteller(
         self,
         *,
         user_id: int,
     ) -> None:
-        await self.with_response_or_default(user_id, lambda current: RsvpResponse(
-            role="Player" if current.role == "Storyteller" else "Storyteller",
-            status=(current and current.status != "Cant" and current.status)\
-                or "Available",
-            arrival_time=(current and current.arrival_time) or None,
-        ))
+        current = self._get_response_or_default(user_id)
+        await self.set_storyteller_role(
+            user_id=user_id,
+            is_storyteller=current.role != "Storyteller",
+        )
+
+    async def set_storyteller_role(
+        self,
+        *,
+        user_id: int,
+        is_storyteller: bool,
+    ) -> None:
+        await self.with_response_or_default(
+            user_id,
+            lambda current: RsvpResponse(
+                role="Storyteller" if is_storyteller else "Player",
+                status=(
+                    ((current.status != "Cant") and current.status) or "Available"
+                )
+                if is_storyteller
+                else current.status,
+                arrival_time=None
+                if is_storyteller and current.status == "Cant"
+                else current.arrival_time,
+            ),
+        )
 
     async def set_user_response(
         self,
@@ -191,27 +261,59 @@ class AvailabilityView(discord.ui.View):
         status: RsvpStatus,
         arrival_time: str | None = None,
     ) -> None:
-        await self.with_response_or_default(user_id, lambda current: RsvpResponse(
-            role=current.role,
-            status=status,
-            arrival_time=arrival_time,
-        ))
+        await self.with_response_or_default(
+            user_id,
+            lambda current: RsvpResponse(
+                role=current.role,
+                status=status,
+                arrival_time=(
+                    None
+                    if status == "Cant"
+                    else (
+                        arrival_time
+                        if arrival_time is not None
+                        else current.arrival_time
+                    )
+                ),
+            ),
+        )
 
     async def remove_user_response(self, user_id: int) -> None:
-        await self._update_response(user_id, None)
+        async with self._lock:
+            await self._update_response(user_id, None)
 
     async def set_room_url(self, room_url: str | None) -> None:
         async with self._lock:
             snapshot = RoomSnapshot.from_url(room_url)
-            self.room_url = snapshot.url
-            self.room_state = snapshot.state
+            self.view_state = ViewState(
+                event_name=self.view_state.event_name,
+                start_unix=self.view_state.start_unix,
+                event_url=self.view_state.event_url,
+                edition=self.view_state.edition,
+                edition_emoji=self.view_state.edition_emoji,
+                room_state=snapshot.state,
+                room_url=snapshot.url,
+                edition_image_url=self.view_state.edition_image_url,
+                event_description=self.view_state.event_description,
+            )
+            self._persist_view_state()
             self._sync_room_action_buttons()
 
     async def close_room(self) -> None:
         async with self._lock:
             snapshot = RoomSnapshot.closed()
-            self.room_url = snapshot.url
-            self.room_state = snapshot.state
+            self.view_state = ViewState(
+                event_name=self.view_state.event_name,
+                start_unix=self.view_state.start_unix,
+                event_url=self.view_state.event_url,
+                edition=self.view_state.edition,
+                edition_emoji=self.view_state.edition_emoji,
+                room_state=snapshot.state,
+                room_url=snapshot.url,
+                edition_image_url=self.view_state.edition_image_url,
+                event_description=self.view_state.event_description,
+            )
+            self._persist_view_state()
             self._sync_room_action_buttons()
 
     async def get_user_ids_for_status(self, status: RsvpStatus) -> list[int]:
@@ -221,11 +323,10 @@ class AvailabilityView(discord.ui.View):
                 for user_id, response in (await self._all_responses()).items()
                 if response.status == status
             ]
+
     async def rebuild(self, interaction: discord.Interaction) -> None:
         if interaction.message is None:
-            print("no interaction")
             return
-
         try:
             await interaction.message.edit(
                 content=await self.build_content(),
@@ -235,14 +336,10 @@ class AvailabilityView(discord.ui.View):
         except discord.HTTPException:
             return
 
-    def event_manager_role(self, interaction: discord.Interaction) -> int | None:
-        return (interaction.guild
-            and self.settings_store.get_event_manager_role_id(interaction.guild.id)
-            or None)
-
     async def _record_storyteller_toggle(
-            self,
-            interaction: discord.Interaction) -> None:
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
         await interaction.response.defer(ephemeral=True, thinking=False)
         await self.toggle_storyteller(user_id=interaction.user.id)
         await self.rebuild(interaction)
@@ -255,11 +352,22 @@ class AvailabilityView(discord.ui.View):
         arrival_time: str | None = None,
     ) -> None:
         await interaction.response.defer(ephemeral=True, thinking=False)
-        await self.with_response_or_default(interaction.user.id, lambda current: RsvpResponse(
-            role=(status == "Cant" and "Player") or current.role,
-            status=status,
-            arrival_time=(status == "Cant" and None) or arrival_time,
-        ))
+        await self.with_response_or_default(
+            interaction.user.id,
+            lambda current: RsvpResponse(
+                role=(status == "Cant" and "Player") or current.role,
+                status=status,
+                arrival_time=(
+                    None
+                    if status == "Cant"
+                    else (
+                        arrival_time
+                        if arrival_time is not None
+                        else current.arrival_time
+                    )
+                ),
+            ),
+        )
 
         if interaction.message is None:
             return
@@ -267,14 +375,15 @@ class AvailabilityView(discord.ui.View):
         await self._remove_other_rsvp_reactions_for_user(
             message=interaction.message,
             user=interaction.user,
-            selected_status=status)
-
+            selected_status=status,
+        )
         await self.rebuild(interaction)
 
     @discord.ui.button(
-        label=butler.design.AVAILABLE_BUTTON_LABEL,
+        label=AVAILABLE_BUTTON_LABEL,
         style=discord.ButtonStyle.success,
-        emoji=butler.design.RSVP_STATUS_EMOJIS[0][1],
+        emoji=RSVP_STATUS_EMOJIS[0][1],
+        custom_id="butler:rsvp:available",
         row=0,
     )
     async def available(
@@ -285,9 +394,10 @@ class AvailabilityView(discord.ui.View):
         await self._record_availability(interaction, "Available")
 
     @discord.ui.button(
-        label=butler.design.MAYBE_BUTTON_LABEL,
+        label=MAYBE_BUTTON_LABEL,
         style=discord.ButtonStyle.secondary,
-        emoji=butler.design.RSVP_STATUS_EMOJIS[1][1],
+        emoji=RSVP_STATUS_EMOJIS[1][1],
+        custom_id="butler:rsvp:maybe",
         row=0,
     )
     async def maybe(
@@ -298,9 +408,10 @@ class AvailabilityView(discord.ui.View):
         await self._record_availability(interaction, "Maybe")
 
     @discord.ui.button(
-        label=butler.design.CANT_BUTTON_LABEL,
+        label=CANT_BUTTON_LABEL,
         style=discord.ButtonStyle.secondary,
-        emoji=butler.design.RSVP_STATUS_EMOJIS[2][1],
+        emoji=RSVP_STATUS_EMOJIS[2][1],
+        custom_id="butler:rsvp:cant",
         row=0,
     )
     async def cant(
@@ -311,22 +422,26 @@ class AvailabilityView(discord.ui.View):
         await self._record_availability(interaction, "Cant")
 
     @discord.ui.button(
-        label=butler.design.ARRIVE_LATER_BUTTON_LABEL,
+        label=ARRIVE_LATER_BUTTON_LABEL,
         style=discord.ButtonStyle.secondary,
-        emoji=butler.design.ARRIVE_LATER_EMOJI,
-        row=1
+        emoji=ARRIVE_LATER_EMOJI,
+        custom_id="butler:rsvp:later",
+        row=1,
     )
     async def later(
         self,
         interaction: discord.Interaction,
-        _: discord.ui.Button[AvailabilityView]
+        _: discord.ui.Button[AvailabilityView],
     ) -> None:
+        from butler.rsvp.ArrivingLaterModal import ArrivingLaterModal
+
         await interaction.response.send_modal(ArrivingLaterModal(self))
 
     @discord.ui.button(
-        label=butler.design.STORYTELLER_BUTTON_LABEL,
+        label=STORYTELLER_BUTTON_LABEL,
         style=discord.ButtonStyle.secondary,
-        emoji=butler.design.STORYTELLER_EMOJI,
+        emoji=STORYTELLER_EMOJI,
+        custom_id="butler:rsvp:storyteller",
         row=1,
     )
     async def storyteller(
@@ -337,9 +452,10 @@ class AvailabilityView(discord.ui.View):
         await self._record_storyteller_toggle(interaction)
 
     @discord.ui.button(
-        label=butler.design.ROOM_LINK_PROMPT_BUTTON_LABEL,
+        label=ROOM_LINK_PROMPT_BUTTON_LABEL,
         style=discord.ButtonStyle.secondary,
-        emoji=butler.design.ROOM_LINK_PROMPT_BUTTON_EMOJI,
+        emoji=ROOM_LINK_PROMPT_BUTTON_EMOJI,
+        custom_id="butler:rsvp:open-room",
         row=2,
     )
     async def prompt_room_link(
@@ -349,22 +465,24 @@ class AvailabilityView(discord.ui.View):
     ) -> None:
         if not can_manage_room_action(
             interaction,
-            event_manager_role_id=interaction.guild
-                and self.settings_store.get_event_manager_role_id(interaction.guild.id)
-                or None,
+            event_manager_role_id=self.event_manager_role(interaction),
         ):
             await interaction.response.send_message(
                 self.open_room_permission_denied_message(interaction),
                 ephemeral=True,
             )
             return
-        await interaction.response.send_modal(RoomLinkModal(self, self.settings_store))
+
+        from butler.rsvp.RoomLinkModal import RoomLinkModal
+
+        await interaction.response.send_modal(RoomLinkModal(self))
 
     @discord.ui.button(
-        label=butler.design.ROOM_CLOSE_BUTTON_LABEL,
+        label=ROOM_CLOSE_BUTTON_LABEL,
         style=discord.ButtonStyle.danger,
-        emoji=butler.design.ROOM_CLOSE_BUTTON_EMOJI,
-        row=1,
+        emoji=ROOM_CLOSE_BUTTON_EMOJI,
+        custom_id="butler:rsvp:close-room",
+        row=2,
     )
     async def close_room_button(
         self,
@@ -373,9 +491,7 @@ class AvailabilityView(discord.ui.View):
     ) -> None:
         if not can_manage_room_action(
             interaction,
-            event_manager_role_id=interaction.guild
-                and self.settings_store.get_event_manager_role_id(interaction.guild.id)
-                or None,
+            event_manager_role_id=self.event_manager_role(interaction),
         ):
             await interaction.response.send_message(
                 self.open_room_permission_denied_message(interaction),
@@ -386,42 +502,3 @@ class AvailabilityView(discord.ui.View):
         await interaction.response.defer(ephemeral=True, thinking=False)
         await self.close_room()
         await self.rebuild(interaction)
-
-
-def build_user_mentions(user_ids: list[int]) -> str:
-    unique_user_ids = sorted(set(user_ids))
-    return " ".join(f"<@{user_id}>" for user_id in unique_user_ids)
-
-
-async def announce_room_opening(
-    *,
-    interaction: discord.Interaction,
-    availability_view: AvailabilityView,
-    message_link: str,
-) -> None:
-    statuses_to_ping: tuple[RsvpStatus, ...] = ("Available","Maybe")
-    user_ids_to_ping: list[int] = []
-    for status in statuses_to_ping:
-        user_ids_to_ping.extend(await availability_view.get_user_ids_for_status(status))
-    mentions = build_user_mentions(user_ids_to_ping)
-
-    channel = interaction.channel
-    if isinstance(channel, (discord.TextChannel, discord.Thread)):
-        if mentions:
-            content = butler.design.ROOM_OPENED_WITH_MENTIONS_TEMPLATE.format(
-                mentions=mentions,
-                message_link=message_link,
-            )
-        else:
-            content = butler.design.ROOM_OPENED_NO_MENTIONS_TEMPLATE.format(
-                message_link=message_link,
-            )
-        with suppress(discord.HTTPException):
-            await channel.send(
-                content,
-                allowed_mentions=discord.AllowedMentions(
-                    users=True,
-                    roles=False,
-                    everyone=False,
-                ),
-            )

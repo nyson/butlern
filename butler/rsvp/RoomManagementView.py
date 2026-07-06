@@ -1,11 +1,18 @@
-from butler.design import ROOM_CLOSE_BUTTON_EMOJI, ROOM_CLOSE_BUTTON_LABEL, ROOM_LINK_PROMPT_BUTTON_EMOJI, ROOM_LINK_PROMPT_BUTTON_LABEL
-from butler.rsvp.AvailabilityView import AvailabilityView, can_manage_room_action, room_permission_denied_message
-from butler.rsvp.rsvp_domain import visible_room_buttons
-from butler.rsvp.rsvp_render import room_line
-from butler.rsvp.RoomManagementRoomLinkModal import RoomManagementRoomLinkModal
-
+from __future__ import annotations
 
 import discord
+
+from butler.design import (
+    ROOM_CLOSE_BUTTON_EMOJI,
+    ROOM_CLOSE_BUTTON_LABEL,
+    ROOM_LINK_PROMPT_BUTTON_EMOJI,
+    ROOM_LINK_PROMPT_BUTTON_LABEL,
+)
+from butler.rsvp.AvailabilityView import AvailabilityView
+from butler.rsvp.rsvp_domain import visible_room_buttons
+from butler.rsvp.rsvp_render import room_line
+from butler.rsvp.view_helpers import can_manage_room_action, room_permission_denied_message
+
 
 class RoomManagementView(discord.ui.View):
     def __init__(
@@ -54,7 +61,7 @@ class RoomManagementView(discord.ui.View):
     def build_content(self, interaction: discord.Interaction) -> str:
         line = room_line(
             room_state=self.availability_view.view_state.room_state,
-            room_url=self.availability_view.room_url,
+            room_url=self.availability_view.view_state.room_url,
         )
         return (
             "## Rumshantering\n"
@@ -65,7 +72,7 @@ class RoomManagementView(discord.ui.View):
     def permission_denied_message(self, interaction: discord.Interaction) -> str:
         return room_permission_denied_message(
             interaction,
-            event_manager_role_id=self.availability_view.event_manager_role(interaction)    ,
+            event_manager_role_id=self.availability_view.event_manager_role(interaction),
         )
 
     async def _refresh_rsvp_message(self) -> None:
@@ -110,6 +117,7 @@ class RoomManagementView(discord.ui.View):
         label=ROOM_LINK_PROMPT_BUTTON_LABEL,
         style=discord.ButtonStyle.secondary,
         emoji=ROOM_LINK_PROMPT_BUTTON_EMOJI,
+        custom_id="butler:room-mgmt:open-room",
         row=0,
     )
     async def open_room_button(
@@ -126,12 +134,16 @@ class RoomManagementView(discord.ui.View):
                 ephemeral=True,
             )
             return
-        await interaction.response.send_modal(RoomManagementRoomLinkModal(self, settings_store=self.availability_view.settings_store))
+
+        from butler.rsvp.RoomManagementRoomLinkModal import RoomManagementRoomLinkModal
+
+        await interaction.response.send_modal(RoomManagementRoomLinkModal(self))
 
     @discord.ui.button(
         label=ROOM_CLOSE_BUTTON_LABEL,
         style=discord.ButtonStyle.danger,
         emoji=ROOM_CLOSE_BUTTON_EMOJI,
+        custom_id="butler:room-mgmt:close-room",
         row=0,
     )
     async def close_room_button(

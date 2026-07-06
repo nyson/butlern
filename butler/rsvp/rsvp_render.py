@@ -12,8 +12,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import butler.design
-
+from butler.design import (
+    EVENT_POST_TEMPLATE,
+    ROOM_CLOSED_MESSAGE,
+    ROOM_OPENED_MESSAGE_TEMPLATE,
+    RSVP_FOOTER_TEXT,
+    RSVP_STATUS_EMOJIS,
+    RSVP_STATUS_LABELS,
+)
 from butler.rsvp.rsvp_domain import (
     RsvpResponse,
     mentions_for_status,
@@ -40,9 +46,9 @@ def room_line(*, room_state: RoomState, room_url: str | None) -> str | None:
     Shared by the RSVP post (which wraps it in spacing) and the room-management message.
     """
     if room_state == "open" and room_url is not None:
-        return butler.design.ROOM_OPENED_MESSAGE_TEMPLATE.format(room_url=room_url)
+        return ROOM_OPENED_MESSAGE_TEMPLATE.format(room_url=room_url)
     if room_state == "closed":
-        return butler.design.ROOM_CLOSED_MESSAGE
+        return ROOM_CLOSED_MESSAGE
     return None
 
 
@@ -62,9 +68,9 @@ def title_line(*, event_name: str, edition_emoji: str | None) -> str:
 
 def status_sections(responses: dict[int, RsvpResponse]) -> str:
     sections: list[str] = []
-    for status, emoji in butler.design.RSVP_STATUS_EMOJIS:
+    for status, emoji in RSVP_STATUS_EMOJIS:
         count = status_count(responses, status)
-        display_label = butler.design.RSVP_STATUS_LABELS[status]
+        display_label = RSVP_STATUS_LABELS[status]
         mentions = mentions_for_status(responses, status) or ""
         sections.append(f"{emoji}  **{display_label} ({count})**\n{mentions}")
     return "\n\n".join(sections)
@@ -72,10 +78,10 @@ def status_sections(responses: dict[int, RsvpResponse]) -> str:
 
 def render_rsvp_content(state: RsvpRenderState) -> str:
     section = room_section(room_state=state.room_state, room_url=state.room_url)
-    return butler.design.EVENT_POST_TEMPLATE.format(
+    return EVENT_POST_TEMPLATE.format(
         title_line=title_line(event_name=state.event_name, edition_emoji=state.edition_emoji),
         event_description=state.event_description,
         room_section=section if section is not None else "\n",
         status_sections=status_sections(state.responses),
-        footer_text=butler.design.RSVP_FOOTER_TEXT,
+        footer_text=RSVP_FOOTER_TEXT,
     )

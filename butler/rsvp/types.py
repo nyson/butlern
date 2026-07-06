@@ -20,10 +20,3 @@ class ViewState:
     edition_image_url: str | None
     event_description: str
 
-@dataclass(frozen=True)
-class RsvpResponse:
-    user: int
-    status: RsvpStatus
-    role: RsvpRole = "Player"
-    arrival_time: str | None = None
-

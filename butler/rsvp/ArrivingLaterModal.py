@@ -10,11 +10,12 @@ from butler.design import ARRIVE_LATER_MODAL_TITLE
 from butler.rsvp.AvailabilityView import AvailabilityView
 from butler.rsvp.rsvp_domain import RsvpResponse
 
+ARRIVE_LATER_DEFAULT = "19:00"
 
 class ArrivingLaterModal(discord.ui.Modal, title=ARRIVE_LATER_MODAL_TITLE):
     arriving_later_hours: ClassVar[discord.ui.TextInput[ArrivingLaterModal]] = discord.ui.TextInput(
         label=ARRIVE_LATER_MODAL_TITLE,
-        placeholder="19:00",
+        placeholder=ARRIVE_LATER_DEFAULT,
         max_length=10,
     )
 

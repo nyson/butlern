@@ -15,7 +15,8 @@ def load_config() -> DiscordConfig:
     load_dotenv()
     return DiscordConfig(
         token=_parse_token(os.getenv("DISCORD_TOKEN")),
-        guild_id=_parse_guild_id(os.getenv("DISCORD_GUILD_ID")))
+        guild_id=_parse_guild_id(os.getenv("DISCORD_GUILD_ID")),
+    )
 
 def _parse_token(raw_token: str | None) -> str:
     normalized_token = (raw_token and raw_token.strip()) or None

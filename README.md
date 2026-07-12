@@ -1,136 +1,154 @@
 # Butler Discord Bot
+Butler creates scheduled Discord events and posts an interactive RSVP message with persistent state, so RSVPs survive bot restarts.
 
-Discord bot that creates same-day scheduled events and posts an interactive RSVP message.
+## Architecture graph
+```mermaid
+flowchart LR
+  subgraph Discord["Discord"]
+    U["Users / Moderators"]
+    API["Discord API (slash commands, buttons, reactions)"]
+  end
+
+  subgraph Butler["Butler service"]
+    APP["butler/app.py<br/>entrypoints + orchestration"]
+    EVENT["butler/event_logic.py<br/>input normalization + validation"]
+    PERM["butler/permissions.py<br/>access checks + permission messaging"]
+    VIEW["butler/rsvp/rsvp_view.py<br/>UI handlers + state mutations"]
+    DOMAIN["butler/rsvp/rsvp_domain.py<br/>pure RSVP rules"]
+    RENDER["butler/rsvp/rsvp_render.py<br/>pure content rendering"]
+    SETTINGS["butler/settings_store.py<br/>guild configuration store"]
+    RSVPSTORE["butler/rsvp/rsvp_store.py<br/>RSVP message/response store"]
+  end
+
+  DB[("SQLite<br/>butler_state.db")]
+
+  U --> API
+  API --> APP
+  APP --> EVENT
+  APP --> PERM
+  APP --> VIEW
+  VIEW --> DOMAIN
+  VIEW --> RENDER
+  APP --> SETTINGS
+  APP --> RSVPSTORE
+  VIEW --> RSVPSTORE
+  SETTINGS <--> DB
+  RSVPSTORE <--> DB
+  APP -->|"startup hydration + stale cleanup"| RSVPSTORE
+  APP -->|"fetch persisted message refs"| API
+```
+
+## Core behavior
+- `/event` creates a scheduled Discord event and posts RSVP content in the configured default channel.
+- RSVP content is plain text (no long-lived embed dependency) and can be updated by buttons or reactions.
+- RSVP and room state are persisted in SQLite and hydrated on startup.
+- Missing persisted Discord messages are cleaned from storage during hydration.
+
+## Module responsibilities
+- `butler/app.py`
+  - Discord command handlers and event handlers (`/event`, `/seteventchannel`, `/seteventrole`, reaction add/remove, startup hydration).
+  - Wires stores, views, permission checks, and event creation flow.
+- `butler/rsvp/rsvp_view.py`
+  - `discord.ui.View` implementation for RSVP buttons/modals.
+  - Persists response changes and room-state transitions via `RsvpMessageStore`.
+- `butler/rsvp/rsvp_domain.py`
+  - Pure RSVP domain logic (response model, reaction-derived status precedence, counts/mentions helpers).
+- `butler/rsvp/rsvp_render.py`
+  - Pure render functions for RSVP message text.
+- `butler/rsvp/rsvp_store.py`
+  - SQLite-backed persistence for RSVP message metadata (`rsvp_message`) and user responses (`rsvp_response`).
+- `butler/settings_store.py`
+  - SQLite-backed guild settings (default event channel and optional event-manager role).
+- `butler/event_logic.py`
+  - Normalizes and validates event inputs (time parsing, room URL validation, defaults).
+- `butler/permissions.py`
+  - Pure and Discord-adapter permission logic for event/room management.
 
 ## Setup
-
 1. Install dependencies:
    - `poetry install`
 2. Create `.env` from `.env.example`.
-3. Set:
-   - `DISCORD_TOKEN` to your bot token
-   - `DISCORD_GUILD_ID` to your test server ID (required for `butler-dev`)
+3. Configure:
+   - `DISCORD_TOKEN` (required)
+   - `DISCORD_GUILD_ID` (required for `butler-dev` strict guild sync)
 
-## Required Discord OAuth Scopes
-
-When inviting the bot, include:
-
+## Required Discord OAuth scopes
 - `bot`
 - `applications.commands`
 
-## Required Bot Permissions
-
-Grant these permissions to the bot role in the server:
-
+## Required bot permissions
 - `View Channels`
 - `Use Application Commands`
 - `Create Events`
 - `Send Messages`
 - `Embed Links`
 
-For `butler-dev`, these are required in the specific guild from `DISCORD_GUILD_ID` because command sync is guild-scoped and strict.
+For `butler-dev`, these permissions must exist in the guild specified by `DISCORD_GUILD_ID`.
 
-## Required Intents
-
-For the current bot features (slash commands, scheduled events, button interactions), no privileged intents are required.
-
-In Discord Developer Portal → **Bot**:
-
-- Leave privileged intents disabled unless you later add features that need them.
-- If you add classic prefix text commands that read message content, then enable **Message Content Intent**.
+## Required intents
+No privileged intents are required for the current slash-command/button/reaction feature set.
 
 ## Run
-
 - Normal mode:
   - `poetry run butler`
 - Dev mode (strict guild sync):
   - `poetry run butler-dev`
 
-State (default event channel + event manager role) is stored in `butler_state.db`
-(SQLite). Override the location with `BUTLER_DB_PATH`.
+`butler-dev` keeps `/previeweventdesign` available for design iteration in the configured guild.
+
+## Persistence model
+All persistent state is stored in SQLite (`butler_state.db` by default, configurable via `BUTLER_DB_PATH`):
+- guild settings (`guild_settings`)
+  - default event channel id
+  - event-manager role id
+- RSVP message metadata (`rsvp_message`)
+- RSVP user responses (`rsvp_response`)
+
+On startup, Butler hydrates persistent RSVP views and removes stale rows that reference deleted/missing Discord messages.
+
+## Command reference
+- `/seteventchannel event_channel:<#channel>`
+  - Sets default channel for event and RSVP posts.
+- `/seteventrole role:<@role|empty>`
+  - Sets/clears role allowed to create events and open/close rooms (in addition to `Manage Server`).
+- `/event`
+  - Args:
+    - `title` (required)
+    - `description` (required)
+    - `edition` (optional)
+    - `room_link` (optional `http://`/`https://`)
+    - `start_time` (optional `HH:MM`, default `19:00`)
+- `/previeweventdesign` (dev mode/guild sync workflows)
+  - Posts RSVP preview without creating a scheduled Discord event.
+
+## RSVP interactions
+Buttons:
+- `🪓 Jag vill vara med!` (`Available`)
+- `🤔 Förmodligen` (`Maybe`)
+- `🛌 Kan inte ikväll 😞` (`Cant`)
+- `🕒 Kommer senare` (arrival-time modal)
+- `📖 Jag vill storytella!` (toggles storyteller role on the response)
+- `🔗 ST: Öppna rummet`
+- `🔒 ST: Stäng rummet`
+
+Supported reaction defaults on RSVP posts:
+- `🪓` → status `Available`
+- `🤔` → status `Maybe`
+- `🛌` → status `Cant`
+- `📖` → storyteller role toggle (independent of status)
+
+Reaction-derived status precedence is deterministic: `Maybe` > `Cant` > `Available`.
 
 ## Run with Docker
-
-Build and run with Docker Compose:
-
+With Compose:
 - `docker compose up --build -d`
 
-Compose reads bot credentials from `.env` and persists SQLite state in the named
-volume `butler_data`.
-
-Run without Compose:
-
+Without Compose:
 - `docker build -t butler .`
 - `docker run --rm --name butler --env-file .env -e BUTLER_DB_PATH=/data/butler_state.db -v butler_data:/data butler`
 
-## Onboarding and default event channel
-
-When Butler joins a server, it posts a short onboarding message asking you to configure the event channel.
-
-Use:
-
-- `/seteventchannel event_channel:<#channel>`
-
-Notes:
-
-- this sets the default channel where Butler posts RSVP messages
-- you can change it later by running `/seteventchannel` again
-- the bot validates it can post in that channel (`View Channel`, `Send Messages`, `Embed Links`)
-
-## Slash command usage
-
-Use `/event` to create the scheduled event and post RSVP in the configured default event channel.
-
-Arguments:
-
-- `title` (required)
-- `description` (required)
-- `start_time` (optional, `HH:MM`, defaults to `19:00`)
-- `room_link` (optional, must be `http://` or `https://` URL)
-
-Behavior:
-
-- if default `19:00` has already passed for today, Butler schedules it for tomorrow at `19:00`
-- if you provide a manual `start_time` that has already passed, Butler returns an error
-- planned events do not require room details up front
-- `location` and `duration` are internal defaults and not user inputs
-- the RSVP post always includes an **Open Event** link
-- room status starts as waiting for a link, can be opened/reopened with `Lägg till rumslänk`, and can be closed with `Stäng rummet`
-
-## RSVP interactions
-
-- Buttons:
-  - `Available`
-  - `Maybe`
-  - `Kommer senare`
-  - `Jag vill storytella!`
-  - `Lägg till rumslänk` (opens or reopens the room)
-  - `Stäng rummet` (closes room and shows `Rummet är nu stängt! Tack för ikväll!`)
-- Emoji reactions are also supported:
-  - `✅` → Available
-  - `🤔` → Maybe
-- there is no unavailable option/button
-
-## Common Errors
-
-### `403 Forbidden (50001): Missing Access`
-
-This usually means one of these:
-
-- `guild_id` is wrong
-- Bot is not invited to that server
-- Missing OAuth scope `applications.commands`
-- Bot role/channel permissions are missing (especially `View Channels` and `Use Application Commands`)
-
-### Token errors (`401 Unauthorized` / `Improper token` / login failure)
-
-- `DISCORD_TOKEN` in `.env` is invalid, expired, or from a different app
-- You regenerated the token but didn’t update `.env`
-
-Fix:
-
-1. Discord Developer Portal → **Bot** → **Reset Token**
-2. Paste new token into `.env`
-3. Restart bot
-
-If a token was exposed accidentally, reset it immediately.
+## Validation
+- `poetry run ruff check .`
+- `poetry run mypy`
+- `poetry run pytest`
+- `poetry run python -m compileall butler`

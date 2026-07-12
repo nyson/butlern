@@ -15,7 +15,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import butler.app as app
-from butler.design import AVAILABLE_EMOJI, CANT_EMOJI
+import butler.rsvp.runtime as rsvp_runtime
+from butler.design import AVAILABLE_EMOJI, CANT_EMOJI, STORYTELLER_EMOJI
+from butler.rsvp.rsvp_store import StoredRsvpMessage
+from butler.rsvp.types import ViewState
 from tests.discord_mocks import (
     invoke,
     make_guild,
@@ -31,18 +34,24 @@ from tests.discord_mocks import (
 )
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def store() -> Iterator[MagicMock]:
     """Patch the module-level settings store with a mock and yield it."""
     mock = MagicMock()
     mock.get_event_manager_role_id.return_value = None
     mock.get_default_event_channel_id.return_value = 10
+    rsvp_store_mock = MagicMock()
+    rsvp_store_mock.get_message.return_value = None
+    rsvp_store_mock.list_messages.return_value = []
     original = app.SETTINGS_STORE
+    original_rsvp_store = app.RSVP_MESSAGE_STORE
     app.SETTINGS_STORE = mock
+    app.RSVP_MESSAGE_STORE = rsvp_store_mock
     try:
         yield mock
     finally:
         app.SETTINGS_STORE = original
+        app.RSVP_MESSAGE_STORE = original_rsvp_store
 
 
 @pytest.fixture
@@ -50,17 +59,23 @@ def views() -> Iterator[dict[int, object]]:
     """Give the handler a fresh ACTIVE_RSVP_VIEWS registry."""
     fresh: dict[int, object] = {}
     original = app.ACTIVE_RSVP_VIEWS
+    original_hydrated = app._BOT_EVENT_STATE.rsvp_views_hydrated
     app.ACTIVE_RSVP_VIEWS = fresh  # type: ignore[assignment]
+    app._BOT_EVENT_STATE.rsvp_views_hydrated = False
     try:
         yield fresh
     finally:
         app.ACTIVE_RSVP_VIEWS = original
+        app._BOT_EVENT_STATE.rsvp_views_hydrated = original_hydrated
 
 
 @pytest.fixture
 def bot_member_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     """Patch get_bot_member to return a fully-permissioned bot member."""
-    monkeypatch.setattr(app, "get_bot_member", lambda guild, user: make_member(member_id=2))
+    monkeypatch.setattr(
+        app,
+        "get_bot_member",
+        lambda guild, user: make_member(member_id=2))  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
 
 
 # --- /seteventchannel -------------------------------------------------------
@@ -80,7 +95,7 @@ async def test_seteventchannel_rejects_cross_guild_channel() -> None:
 
 
 async def test_seteventchannel_missing_bot_member(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(app, "get_bot_member", lambda guild, user: None)
+    monkeypatch.setattr(app, "get_bot_member", lambda guild, user: None) # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     ix = make_interaction(guild=make_guild(guild_id=1))
     await invoke(app.seteventchannel, ix.interaction, make_text_channel(guild_id=1))
     assert "couldn't verify my server permissions" in sent_text(ix.response.send_message)
@@ -196,7 +211,7 @@ async def test_event_missing_bot_permissions(
     monkeypatch.setattr(
         app,
         "get_bot_member",
-        lambda guild, user: make_member(permissions=make_permissions(create_events=False)),
+        lambda guild, user: make_member(permissions=make_permissions(create_events=False)), # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
     )
     channel = make_text_channel(channel_id=10, guild_id=1)
     ix = make_interaction(guild=make_guild(guild_id=1, channel=channel), user=make_member())
@@ -207,7 +222,7 @@ async def test_event_missing_bot_permissions(
 async def test_event_success_registers_view(
     store: MagicMock, views: dict[int, object], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(app, "get_bot_member", lambda guild, user: make_member(member_id=2))
+    monkeypatch.setattr(app, "get_bot_member", lambda guild, user: make_member(member_id=2)) # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
     channel = make_text_channel(channel_id=10, guild_id=1)
     guild = make_guild(guild_id=1, channel=channel)
     ix = make_interaction(guild=guild, user=make_member())
@@ -230,7 +245,7 @@ async def test_previeweventdesign_requires_guild() -> None:
 async def test_previeweventdesign_success_posts_without_event(
     store: MagicMock, views: dict[int, object], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(app, "get_bot_member", lambda guild, user: make_member(member_id=2))
+    monkeypatch.setattr(app, "get_bot_member", lambda guild, user: make_member(member_id=2))  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
     channel = make_text_channel(channel_id=10, guild_id=1)
     guild = make_guild(guild_id=1, channel=channel)
     ix = make_interaction(guild=guild, user=make_member())
@@ -261,10 +276,34 @@ def reaction_bot(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 def _reaction_view() -> MagicMock:
     view = MagicMock()
     view.set_user_response = AsyncMock()
+    view.set_storyteller_role = AsyncMock()
     view.remove_user_response = AsyncMock()
     view.build_content = AsyncMock(return_value="content")
     view.build_embed = MagicMock(return_value=None)
     return view
+
+def _stored_message(
+    *,
+    message_id: int = 999,
+    channel_id: int = 10,
+    guild_id: int = 1,
+) -> StoredRsvpMessage:
+    return StoredRsvpMessage(
+        message_id=message_id,
+        channel_id=channel_id,
+        guild_id=guild_id,
+        view_state=ViewState(
+            event_name="Game Night",
+            start_unix=1_700_000_000,
+            event_url="https://discord.com/events/1/2",
+            edition="Custom",
+            edition_emoji=None,
+            room_state="pending",
+            room_url=None,
+            edition_image_url=None,
+            event_description="desc",
+        ),
+    )
 
 
 async def test_reaction_add_ignores_bot_own(reaction_bot: MagicMock) -> None:
@@ -286,16 +325,39 @@ async def test_reaction_add_records_status(
     view = _reaction_view()
     views[999] = view
     payload = make_raw_reaction(user_id=2, message_id=999, emoji=AVAILABLE_EMOJI)
+    message = make_message(message_id=999)
+    message.reactions = [make_reaction(emoji=AVAILABLE_EMOJI, user_ids=(2,))]
 
     # fetch_message_from_channel needs a TextChannel; route through fetch_channel.
-    reaction_bot.fetch_channel.return_value = _text_channel_with_message(
-        make_message(message_id=999)
-    )
+    reaction_bot.fetch_channel.return_value = _text_channel_with_message(message)
 
     await app.on_raw_reaction_add(payload)
     view.set_user_response.assert_awaited_once_with(
         user_id=2,
         status="Available")
+    view.set_storyteller_role.assert_awaited_once_with(
+        user_id=2,
+        is_storyteller=False,
+    )
+
+
+async def test_reaction_add_storyteller_sets_role(
+    reaction_bot: MagicMock, views: dict[int, object]
+) -> None:
+    view = _reaction_view()
+    views[999] = view
+    payload = make_raw_reaction(user_id=2, message_id=999, emoji=STORYTELLER_EMOJI)
+    message = make_message(message_id=999)
+    message.reactions = [make_reaction(emoji=STORYTELLER_EMOJI, user_ids=(2,))]
+    reaction_bot.fetch_channel.return_value = _text_channel_with_message(message)
+
+    await app.on_raw_reaction_add(payload)
+
+    view.set_user_response.assert_awaited_once_with(user_id=2, status="Available")
+    view.set_storyteller_role.assert_awaited_once_with(
+        user_id=2,
+        is_storyteller=True,
+    )
 
 
 async def test_reaction_remove_resolves_status(
@@ -310,20 +372,105 @@ async def test_reaction_remove_resolves_status(
 
     await app.on_raw_reaction_remove(payload)
     view.set_user_response.assert_awaited_once_with(user_id=2, status="Cant")
+    view.set_storyteller_role.assert_awaited_once_with(
+        user_id=2,
+        is_storyteller=False,
+    )
+
+async def test_resolve_active_view_rehydrates_from_store(
+    reaction_bot: MagicMock,
+    store: MagicMock,
+    views: dict[int, object],
+) -> None:
+    _ = store
+    rsvp_store = cast(MagicMock, app.RSVP_MESSAGE_STORE)
+    rsvp_store.get_message.return_value = _stored_message(message_id=999, channel_id=10)
+    reaction_bot.fetch_channel.return_value = _text_channel_with_message(
+        make_message(message_id=999),
+    )
+
+    resolved = await rsvp_runtime.resolve_active_view(
+        message_id=999,
+        channel_id=10,
+        active_views=app.ACTIVE_RSVP_VIEWS,
+        bot=app.bot,
+        settings_store=app.SETTINGS_STORE,
+        view_store=app.RSVP_MESSAGE_STORE,
+    )
+
+    assert resolved is not None
+    assert 999 in views
+    reaction_bot.add_view.assert_called()
 
 
-# async def test_reaction_remove_clears_when_no_reactions(
-#     reaction_bot: MagicMock, views: dict[int, object]
-# ) -> None:
-#     view = _reaction_view()
-#     views[999] = view
-#     message = make_message(message_id=999)
-#     message.reactions = []
-#     reaction_bot.fetch_channel.return_value = _text_channel_with_message(message)
-#     payload = make_raw_reaction(user_id=2, message_id=999, emoji=LATER_EMOJI)
+async def test_resolve_active_view_cleans_stale_store_entry(
+    reaction_bot: MagicMock,
+    store: MagicMock,
+    views: dict[int, object],
+) -> None:
+    _ = store
+    _ = views
+    rsvp_store = cast(MagicMock, app.RSVP_MESSAGE_STORE)
+    rsvp_store.get_message.return_value = _stored_message(message_id=999, channel_id=10)
+    reaction_bot.fetch_channel.return_value = MagicMock()  # Not a TextChannel/Thread.
 
-#     await app.on_raw_reaction_remove(payload)
-#     view.remove_user_response.assert_awaited_once_with(2)
+    resolved = await rsvp_runtime.resolve_active_view(
+        message_id=999,
+        channel_id=10,
+        active_views=app.ACTIVE_RSVP_VIEWS,
+        bot=app.bot,
+        settings_store=app.SETTINGS_STORE,
+        view_store=app.RSVP_MESSAGE_STORE,
+    )
+
+    assert resolved is None
+    rsvp_store.delete_message.assert_called_once_with(999)
+
+
+async def test_hydrate_persistent_views_restores_and_cleans(
+    reaction_bot: MagicMock,
+    store: MagicMock,
+    views: dict[int, object],
+) -> None:
+    _ = store
+    rsvp_store = cast(MagicMock, app.RSVP_MESSAGE_STORE)
+    rsvp_store.list_messages.return_value = [
+        _stored_message(message_id=999, channel_id=10),
+        _stored_message(message_id=1000, channel_id=11),
+    ]
+
+    async def _fetch_channel(channel_id: int) -> object:
+        if channel_id == 10:
+            return _text_channel_with_message(make_message(message_id=999))
+        return MagicMock()
+
+    reaction_bot.fetch_channel = AsyncMock(side_effect=_fetch_channel)
+
+    app._BOT_EVENT_STATE.rsvp_views_hydrated = await rsvp_runtime.hydrate_persistent_views(
+        already_hydrated=app._BOT_EVENT_STATE.rsvp_views_hydrated,
+        active_views=app.ACTIVE_RSVP_VIEWS,
+        bot=app.bot,
+        settings_store=app.SETTINGS_STORE,
+        view_store=app.RSVP_MESSAGE_STORE,
+    )
+
+    assert 999 in views
+    assert 1000 not in views
+    rsvp_store.delete_message.assert_called_with(1000)
+
+
+async def test_reaction_remove_clears_when_no_reactions(
+    reaction_bot: MagicMock, views: dict[int, object]
+) -> None:
+    view = _reaction_view()
+    views[999] = view
+    message = make_message(message_id=999)
+    message.reactions = []
+    reaction_bot.fetch_channel.return_value = _text_channel_with_message(message)
+    payload = make_raw_reaction(user_id=2, message_id=999, emoji=CANT_EMOJI)
+
+    await app.on_raw_reaction_remove(payload)
+    view.remove_user_response.assert_awaited_once_with(2)
 
 
 def _text_channel_with_message(message: object) -> object:

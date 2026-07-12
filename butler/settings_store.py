@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from discord.utils import deprecated
+
 SCHEMA_SQL: Final[str] = """
 CREATE TABLE IF NOT EXISTS guild_settings (
     guild_id INTEGER PRIMARY KEY,
@@ -140,21 +142,22 @@ class GuildSettingsStore:
         return None
 
 
+@deprecated("Use SQLite backend instead")
 def _legacy_rows(parsed_content: object) -> list[tuple[int, int | None, int | None]]:
     if not isinstance(parsed_content, dict):
         return []
     rows: list[tuple[int, int | None, int | None]] = []
-    for raw_guild_id, guild_settings in parsed_content.items():
+    for raw_guild_id, guild_settings in parsed_content.items(): # pyright: ignore[reportUnknownVariableType]
         if not isinstance(raw_guild_id, str) or not isinstance(guild_settings, dict):
             continue
         try:
             guild_id = int(raw_guild_id)
         except ValueError:
             continue
-        event_channel_id = guild_settings.get("event_channel_id")
+        event_channel_id = guild_settings.get("event_channel_id") # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
         if not isinstance(event_channel_id, int):
             event_channel_id = None
-        event_manager_role_id = guild_settings.get("event_manager_role_id")
+        event_manager_role_id = guild_settings.get("event_manager_role_id") # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
         if not isinstance(event_manager_role_id, int):
             event_manager_role_id = None
         if event_channel_id is None and event_manager_role_id is None:

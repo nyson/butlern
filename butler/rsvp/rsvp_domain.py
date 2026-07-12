@@ -8,11 +8,11 @@ from butler.design import STORYTELLER_EMOJI
 from butler.rsvp.types import RoomButton, RoomState, RsvpRole, RsvpStatus
 
 # Order in which reaction-derived statuses win when a user holds several reactions
-# at once: Maybe > Later > Storyteller > Available.
+# at once: Maybe > Cant > Available. Storyteller is tracked as a role, not a status.
 REACTION_STATUS_PRECEDENCE: Final[tuple[RsvpStatus, ...]] = (
-    "Available",
     "Maybe",
     "Cant",
+    "Available",
 )
 
 
@@ -66,6 +66,8 @@ def status_from_emojis(
     Returns `None` when no emojis are present (the user has no relevant reactions left).
     """
     present = {status_from_emoji(emoji, emoji_to_status) for emoji in emojis}
+    if not present:
+        return None
     for status in REACTION_STATUS_PRECEDENCE:
         if status in present:
             return status

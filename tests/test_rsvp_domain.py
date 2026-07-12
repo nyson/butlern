@@ -8,7 +8,6 @@ The room-state machine (`RoomSnapshot`, `visible_room_buttons`) is covered in
 from __future__ import annotations
 
 from butler.design import (
-    ARRIVE_LATER_EMOJI,
     AVAILABLE_EMOJI,
     CANT_EMOJI,
     EMOJI_TO_STATUS,
@@ -108,19 +107,19 @@ def test_status_from_emoji_unknown_is_available() -> None:
     assert status_from_emoji("🎲", EMOJI_TO_STATUS) == "Available"
 
 
-# def test_status_from_emojis_empty_is_none() -> None:
-#     assert status_from_emojis([], EMOJI_TO_STATUS) is None
+def test_status_from_emojis_empty_is_none() -> None:
+    assert status_from_emojis([], EMOJI_TO_STATUS) is None
 
 
 def test_status_from_emojis_precedence_maybe_wins() -> None:
     emojis = [CANT_EMOJI, MAYBE_EMOJI, AVAILABLE_EMOJI]
-    assert status_from_emojis(emojis, EMOJI_TO_STATUS) == "Available"
+    assert status_from_emojis(emojis, EMOJI_TO_STATUS) == "Maybe"
 
 
 def test_status_from_emojis_precedence_later_over_storyteller() -> None:
     assert status_from_emojis(
-        [STORYTELLER_EMOJI, ARRIVE_LATER_EMOJI],
-        EMOJI_TO_STATUS) == "Available"
+        [STORYTELLER_EMOJI, CANT_EMOJI],
+        EMOJI_TO_STATUS) == "Cant"
 
 
 # def test_status_from_emojis_precedence_storyteller_over_available() -> None:

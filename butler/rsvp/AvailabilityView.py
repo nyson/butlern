@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from contextlib import suppress
+from dataclasses import replace
 from typing import Final
 
 import discord
@@ -241,7 +242,8 @@ class AvailabilityView(discord.ui.View):
     ) -> None:
         await self.with_response_or_default(
             user_id,
-            lambda current: RsvpResponse(
+            lambda current: replace(
+                current,
                 role="Storyteller" if is_storyteller else "Player",
                 status=(
                     ((current.status != "Cant") and current.status) or "Available"
@@ -263,8 +265,8 @@ class AvailabilityView(discord.ui.View):
     ) -> None:
         await self.with_response_or_default(
             user_id,
-            lambda current: RsvpResponse(
-                role=current.role,
+            lambda current: replace(
+                current,
                 status=status,
                 arrival_time=(
                     None
@@ -354,7 +356,8 @@ class AvailabilityView(discord.ui.View):
         await interaction.response.defer(ephemeral=True, thinking=False)
         await self.with_response_or_default(
             interaction.user.id,
-            lambda current: RsvpResponse(
+            lambda current: replace(
+                current,
                 role=(status == "Cant" and "Player") or current.role,
                 status=status,
                 arrival_time=(

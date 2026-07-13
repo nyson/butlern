@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import contextlib
 import time
+from dataclasses import replace
 from typing import ClassVar
 
 import discord
 
 from butler.design import ARRIVE_LATER_MODAL_TITLE
 from butler.rsvp.AvailabilityView import AvailabilityView
-from butler.rsvp.rsvp_domain import RsvpResponse
 
 ARRIVE_LATER_DEFAULT = "19:00"
 
@@ -43,11 +43,12 @@ class ArrivingLaterModal(discord.ui.Modal, title=ARRIVE_LATER_MODAL_TITLE):
         await interaction.response.defer(ephemeral=True, thinking=False)
         await self.view.with_response_or_default(
             interaction.user.id,
-            lambda current: RsvpResponse(
-                role=current.role,
-                status=(current.status == "Cant" and "Available") or current.status,
+            lambda current: replace(
+                current,
+                status=(current.status == "Cant" and "Available") \
+                    or current.status,
                 arrival_time=arrival_time,
-            ),
+            )
         )
         if interaction.message is not None:
             await self.view.rebuild(interaction)

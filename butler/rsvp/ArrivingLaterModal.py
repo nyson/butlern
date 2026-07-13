@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import contextlib
-from dataclasses import replace
 import time
+from dataclasses import replace
 from typing import ClassVar
 
 import discord
@@ -44,11 +44,11 @@ class ArrivingLaterModal(discord.ui.Modal, title=ARRIVE_LATER_MODAL_TITLE):
         await self.view.with_response_or_default(
             interaction.user.id,
             lambda current: replace(
-                current, 
+                current,
                 status=(current.status == "Cant" and "Available") \
                     or current.status,
                 arrival_time=arrival_time,
-            ) 
+            )
         )
         if interaction.message is not None:
             await self.view.rebuild(interaction)

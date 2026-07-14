@@ -11,6 +11,7 @@ while the `Ix` harness also exposes the raw `AsyncMock` recorders for assertions
 
 from __future__ import annotations
 
+import datetime as dt
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, cast
@@ -89,11 +90,17 @@ def make_message(*, message_id: int = 999) -> discord.Message:
 
 
 def make_scheduled_event(
-    *, event_id: int = 555, name: str = "Game Night"
+    *,
+    event_id: int = 555,
+    name: str = "Game Night",
+    status: discord.EventStatus = discord.EventStatus.scheduled,
+    start_time: dt.datetime | None = None,
 ) -> discord.ScheduledEvent:
     event = MagicMock(spec=discord.ScheduledEvent)
     event.id = event_id
     event.name = name
+    event.status = status
+    event.start_time = start_time or (dt.datetime.now(dt.UTC) + dt.timedelta(hours=1))
     return cast(discord.ScheduledEvent, event)
 
 
@@ -104,6 +111,7 @@ def make_guild(
     role: discord.Role | None = None,
     channel: discord.TextChannel | None = None,
     scheduled_event: discord.ScheduledEvent | None = None,
+    scheduled_events: list[discord.ScheduledEvent] | None = None,
 ) -> discord.Guild:
     guild = MagicMock(spec=discord.Guild)
     guild.id = guild_id
@@ -115,6 +123,26 @@ def make_guild(
     guild.create_scheduled_event = AsyncMock(
         return_value=scheduled_event if scheduled_event is not None else make_scheduled_event()
     )
+
+    resolved_scheduled_events = list(scheduled_events or [])
+    guild.fetch_scheduled_events = AsyncMock(return_value=resolved_scheduled_events)
+
+    async def _fetch_scheduled_event(
+        scheduled_event_id: int,
+        /,
+        *,
+        with_counts: bool = True,
+    ) -> discord.ScheduledEvent:
+        _ = with_counts
+        for event in resolved_scheduled_events:
+            if event.id == scheduled_event_id:
+                return event
+        response = MagicMock()
+        response.status = 404
+        response.reason = "Not Found"
+        raise discord.NotFound(response, "Unknown Scheduled Event")
+
+    guild.fetch_scheduled_event = AsyncMock(side_effect=_fetch_scheduled_event)
     return cast(discord.Guild, guild)
 
 

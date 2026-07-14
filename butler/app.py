@@ -103,14 +103,17 @@ async def seteventrole(
     title="Event title",
     description="Event description text",
     edition="Optional edition from BOTC resources",
+    event="Välj befintligt event eller låt Butlern skapa ett nytt",
     room_link="Optional room URL (http/https) to include in the post",
     start_time="Optional start time in 24h format HH:MM (default: 19:00)",
 )
 @app_commands.choices(edition=rsvp_event_command.BOTC_EDITION_CHOICES)
+@app_commands.autocomplete(event=rsvp_event_command.autocomplete_existing_event)
 async def event(
     interaction: discord.Interaction,
     title: str,
     description: str,
+    event: str,
     edition: app_commands.Choice[str] | None = None,
     room_link: str | None = None,
     start_time: str | None = None,
@@ -119,6 +122,7 @@ async def event(
         interaction=interaction,
         title=title,
         description=description,
+        event=event,
         edition=edition,
         room_link=room_link,
         start_time=start_time,

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import datetime as dt
 from collections.abc import Callable, MutableMapping
-from typing import Final
+from dataclasses import dataclass
+from typing import Final, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import discord
 from discord import app_commands
@@ -47,6 +49,83 @@ BOTC_EDITION_CHOICES: Final[list[app_commands.Choice[str]]] = [
     for edition in BOTC_EDITIONS
 ]
 
+MAX_EVENT_AUTOCOMPLETE_CHOICES: Final[int] = 25
+MAX_EVENT_CHOICE_NAME_LENGTH: Final[int] = 100
+_CONNECTED_EVENT_CACHE: dict[int, int] = {}
+_AUTOCOMPLETE_EVENT_CACHE: dict[int, list[tuple[str, str]]] = {}
+CREATE_NEW_EVENT_CHOICE_LABEL: Final[str] = "Låt Butlern skapa ett evenemang!"
+CREATE_NEW_EVENT_CHOICE_VALUE: Final[str] = "__butler_create_new_event__"
+_SWEDISH_TIMEZONE: dt.tzinfo
+
+try:
+    _SWEDISH_TIMEZONE = ZoneInfo("Europe/Stockholm")
+except ZoneInfoNotFoundError:
+    _SWEDISH_TIMEZONE = dt.timezone(dt.timedelta(hours=1), name="CET")
+
+EventResolutionSource = Literal["selected", "cache", "lookup"]
+
+
+@dataclass(frozen=True)
+class ExistingEventResolution:
+    event: discord.ScheduledEvent | None
+    source: EventResolutionSource | None
+    error_message: str | None = None
+
+
+def reset_connected_event_cache() -> None:
+    _CONNECTED_EVENT_CACHE.clear()
+    _AUTOCOMPLETE_EVENT_CACHE.clear()
+
+
+def cached_connected_event_id(*, guild_id: int) -> int | None:
+    return _CONNECTED_EVENT_CACHE.get(guild_id)
+
+
+def cache_connected_event_id(*, guild_id: int, event_id: int) -> None:
+    _CONNECTED_EVENT_CACHE[guild_id] = event_id
+
+
+def clear_connected_event_id(*, guild_id: int) -> None:
+    _CONNECTED_EVENT_CACHE.pop(guild_id, None)
+
+
+def _drop_cached_event_option(*, guild_id: int, event_id: int) -> None:
+    event_id_value = str(event_id)
+    cached_options = _AUTOCOMPLETE_EVENT_CACHE.get(guild_id, [])
+    _AUTOCOMPLETE_EVENT_CACHE[guild_id] = [
+        option
+        for option in cached_options
+        if option[1] != event_id_value
+    ]
+
+
+def _upsert_cached_event_option(*, guild_id: int, event: discord.ScheduledEvent) -> None:
+    event_id_value = str(event.id)
+    existing_options = _AUTOCOMPLETE_EVENT_CACHE.get(guild_id, [])
+    updated_options: list[tuple[str, str]] = [(_event_choice_name(event), event_id_value)]
+    updated_options.extend(
+        option
+        for option in existing_options
+        if option[1] != event_id_value
+    )
+    _AUTOCOMPLETE_EVENT_CACHE[guild_id] = updated_options
+
+
+def _cache_reusable_events_for_guild(
+    *,
+    guild_id: int,
+    events: list[discord.ScheduledEvent],
+) -> None:
+    if not events:
+        clear_connected_event_id(guild_id=guild_id)
+        _AUTOCOMPLETE_EVENT_CACHE[guild_id] = []
+        return
+    cache_connected_event_id(guild_id=guild_id, event_id=events[0].id)
+    _AUTOCOMPLETE_EVENT_CACHE[guild_id] = [
+        (_event_choice_name(event), str(event.id))
+        for event in events
+    ]
+
 
 def build_event_url(*, guild_id: int, event_id: int) -> str:
     return f"https://discord.com/events/{guild_id}/{event_id}"
@@ -54,6 +133,235 @@ def build_event_url(*, guild_id: int, event_id: int) -> str:
 
 def build_preview_event_url(*, guild_id: int, channel_id: int) -> str:
     return f"https://discord.com/channels/{guild_id}/{channel_id}"
+
+
+def _coerce_utc(value: dt.datetime) -> dt.datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=dt.UTC)
+    return value.astimezone(dt.UTC)
+
+
+def _event_start_utc(event: discord.ScheduledEvent) -> dt.datetime:
+    return _coerce_utc(event.start_time)
+
+
+def _is_reusable_scheduled_event(
+    *,
+    event: discord.ScheduledEvent,
+    now_utc: dt.datetime,
+) -> bool:
+    if event.status not in {discord.EventStatus.active, discord.EventStatus.scheduled}:
+        return False
+    event_start_utc = _event_start_utc(event)
+    event_start_swedish = event_start_utc.astimezone(_SWEDISH_TIMEZONE)
+    now_swedish = now_utc.astimezone(_SWEDISH_TIMEZONE)
+    if event_start_swedish.date() != now_swedish.date():
+        return False
+    return not (event.status == discord.EventStatus.scheduled and event_start_utc < now_utc)
+
+
+def _event_sort_key(event: discord.ScheduledEvent) -> tuple[int, float, int]:
+    status_priority = 0 if event.status == discord.EventStatus.active else 1
+    start_timestamp = _event_start_utc(event).timestamp()
+    return status_priority, start_timestamp, event.id
+
+
+async def reusable_scheduled_events_for_guild(
+    *,
+    guild: discord.Guild,
+) -> list[discord.ScheduledEvent]:
+    try:
+        events = await guild.fetch_scheduled_events(with_counts=False)
+    except (discord.Forbidden, discord.HTTPException):
+        return []
+
+    now_utc = dt.datetime.now(dt.UTC)
+    reusable_events = [
+        event
+        for event in events
+        if _is_reusable_scheduled_event(event=event, now_utc=now_utc)
+    ]
+    reusable_events.sort(key=_event_sort_key)
+    return reusable_events
+
+
+async def fetch_scheduled_event_by_id(
+    *,
+    guild: discord.Guild,
+    event_id: int,
+) -> discord.ScheduledEvent | None:
+    try:
+        return await guild.fetch_scheduled_event(event_id, with_counts=False)
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        return None
+
+
+def _event_choice_name(event: discord.ScheduledEvent) -> str:
+    swedish_start = _event_start_utc(event).astimezone(_SWEDISH_TIMEZONE)
+    start_label = swedish_start.strftime("%H:%M")
+    raw_name = f"{event.name} — {start_label}"
+    if len(raw_name) <= MAX_EVENT_CHOICE_NAME_LENGTH:
+        return raw_name
+    return f"{raw_name[:MAX_EVENT_CHOICE_NAME_LENGTH - 1]}…"
+
+
+async def autocomplete_existing_event(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    guild = interaction.guild
+    if guild is None:
+        return [
+            app_commands.Choice(
+                name=CREATE_NEW_EVENT_CHOICE_LABEL,
+                value=CREATE_NEW_EVENT_CHOICE_VALUE,
+            ),
+        ]
+    candidates = _AUTOCOMPLETE_EVENT_CACHE.get(guild.id, [])
+    query = current.strip().casefold()
+    if query:
+        candidates = [
+            option
+            for option in candidates
+            if query in option[0].casefold() or query in option[1]
+        ]
+    event_choices = [
+        app_commands.Choice(name=name, value=value)
+        for name, value in candidates[:MAX_EVENT_AUTOCOMPLETE_CHOICES]
+    ]
+    return [
+        app_commands.Choice(
+            name=CREATE_NEW_EVENT_CHOICE_LABEL,
+            value=CREATE_NEW_EVENT_CHOICE_VALUE,
+        ),
+        *event_choices[: max(0, MAX_EVENT_AUTOCOMPLETE_CHOICES - 1)],
+    ]
+
+
+def _parse_selected_event_id(value: str) -> int | None:
+    normalized_value = value.strip()
+    if not normalized_value:
+        return None
+    try:
+        return int(normalized_value)
+    except ValueError:
+        return None
+
+
+async def _resolve_selected_existing_event(
+    *,
+    guild: discord.Guild,
+    selected_event_value: str,
+) -> ExistingEventResolution:
+    event_id = _parse_selected_event_id(selected_event_value)
+    if event_id is None:
+        return ExistingEventResolution(
+            event=None,
+            source=None,
+            error_message="Invalid `existing_event` value. Pick an event from autocomplete.",
+        )
+    event = await fetch_scheduled_event_by_id(guild=guild, event_id=event_id)
+    if event is None:
+        return ExistingEventResolution(
+            event=None,
+            source=None,
+            error_message=(
+                "I couldn't find that selected event anymore. "
+                "Pick it again from autocomplete."
+            ),
+        )
+    if not _is_reusable_scheduled_event(
+        event=event,
+        now_utc=dt.datetime.now(dt.UTC),
+    ):
+        _drop_cached_event_option(guild_id=guild.id, event_id=event.id)
+        return ExistingEventResolution(
+            event=None,
+            source=None,
+            error_message="That selected event is no longer active/upcoming.",
+        )
+    cache_connected_event_id(guild_id=guild.id, event_id=event.id)
+    _upsert_cached_event_option(guild_id=guild.id, event=event)
+    return ExistingEventResolution(event=event, source="selected")
+
+
+async def _resolve_cached_existing_event(
+    *,
+    guild: discord.Guild,
+) -> discord.ScheduledEvent | None:
+    cached_event_id = cached_connected_event_id(guild_id=guild.id)
+    if cached_event_id is None:
+        return None
+    event = await fetch_scheduled_event_by_id(guild=guild, event_id=cached_event_id)
+    if event is None:
+        clear_connected_event_id(guild_id=guild.id)
+        _drop_cached_event_option(guild_id=guild.id, event_id=cached_event_id)
+        return None
+    if not _is_reusable_scheduled_event(
+        event=event,
+        now_utc=dt.datetime.now(dt.UTC),
+    ):
+        clear_connected_event_id(guild_id=guild.id)
+        _drop_cached_event_option(guild_id=guild.id, event_id=cached_event_id)
+        return None
+    return event
+
+
+async def resolve_existing_event_for_command(
+    *,
+    guild: discord.Guild,
+    selected_event_value: str | None,
+) -> ExistingEventResolution:
+    if selected_event_value == CREATE_NEW_EVENT_CHOICE_VALUE:
+        return ExistingEventResolution(event=None, source="selected")
+    if selected_event_value is not None and selected_event_value.strip():
+        return await _resolve_selected_existing_event(
+            guild=guild,
+            selected_event_value=selected_event_value,
+        )
+
+    cached_event = await _resolve_cached_existing_event(guild=guild)
+    if cached_event is not None:
+        return ExistingEventResolution(event=cached_event, source="cache")
+
+    lookup_candidates = await reusable_scheduled_events_for_guild(guild=guild)
+    _cache_reusable_events_for_guild(
+        guild_id=guild.id,
+        events=lookup_candidates,
+    )
+    if not lookup_candidates:
+        return ExistingEventResolution(event=None, source=None)
+    selected_event = lookup_candidates[0]
+    return ExistingEventResolution(event=selected_event, source="lookup")
+
+
+def event_start_unix(
+    *,
+    event: discord.ScheduledEvent,
+) -> int:
+    return int(_coerce_utc(event.start_time).timestamp())
+
+
+async def warmup_connected_event_cache(*, bot: commands.Bot) -> None:
+    warmed = 0
+    empty = 0
+    for guild in bot.guilds:
+        candidates = await reusable_scheduled_events_for_guild(guild=guild)
+        _cache_reusable_events_for_guild(
+            guild_id=guild.id,
+            events=candidates,
+        )
+        if not candidates:
+            empty += 1
+            print(f"Event cache warmup: guild={guild.id}, reusable_event=none")
+            continue
+        selected = candidates[0]
+        warmed += 1
+        print(
+            f"Event cache warmup: guild={guild.id}, "
+            f"reusable_event={selected.id} ({selected.name})"
+        )
+    print(f"Event cache warmup complete: cached={warmed}, empty={empty}.")
 
 
 def resolve_edition_media(
@@ -173,6 +481,37 @@ async def ensure_event_creation_permissions(
     return True
 
 
+async def ensure_event_post_permissions(
+    *,
+    interaction: discord.Interaction,
+    guild: discord.Guild,
+    event_channel: discord.TextChannel,
+    bot: commands.Bot,
+    get_bot_member_fn: Callable[[discord.Guild, discord.ClientUser | None], discord.Member | None],
+) -> bool:
+    bot_member = get_bot_member_fn(guild, bot.user)
+    if bot_member is None:
+        await interaction.followup.send(
+            "I couldn't verify my server permissions. Re-invite the bot and try again.",
+            ephemeral=True,
+        )
+        return False
+    missing_permissions = get_missing_post_permissions(
+        bot_member=bot_member,
+        event_channel=event_channel,
+    )
+    if missing_permissions:
+        await interaction.followup.send(
+            (
+                "I can't post the RSVP in "
+                f"{event_channel.mention}: {format_permissions(missing_permissions)}"
+            ),
+            ephemeral=True,
+        )
+        return False
+    return True
+
+
 async def resolve_event_command_context(
     interaction: discord.Interaction,
 ) -> tuple[discord.Guild, discord.Member] | None:
@@ -258,6 +597,7 @@ async def post_rsvp_message(
     event_channel: discord.TextChannel,
     view: AvailabilityView,
     event_link_message: str | None = None,
+    created_event: bool = True,
 ) -> discord.Message | None:
     try:
         if event_link_message is not None:
@@ -277,18 +617,86 @@ async def post_rsvp_message(
             view=view,
         )
     except discord.Forbidden:
-        await interaction.followup.send(
-            f"Event created, but I can't post in {event_channel.mention}. "
-            "Check `Send Messages`.",
-            ephemeral=True,
-        )
+        if created_event:
+            message = (
+                f"Event created, but I can't post in {event_channel.mention}. "
+                "Check `Send Messages`."
+            )
+        else:
+            message = (
+                f"I couldn't post the RSVP in {event_channel.mention}. "
+                "Check `Send Messages`."
+            )
+        await interaction.followup.send(message, ephemeral=True)
         return None
     except discord.HTTPException as exc:
+        message = (
+            f"Event was created, but posting RSVP message failed: {exc}"
+            if created_event
+            else f"Posting RSVP message failed: {exc}"
+        )
+        await interaction.followup.send(message, ephemeral=True)
+        return None
+
+
+async def resolve_or_create_event_for_command(
+    *,
+    interaction: discord.Interaction,
+    guild: discord.Guild,
+    selected_event_value: str | None,
+    event_input: EventInput,
+    event_channel: discord.TextChannel,
+    bot: commands.Bot,
+    get_bot_member_fn: Callable[[discord.Guild, discord.ClientUser | None], discord.Member | None],
+) -> tuple[discord.ScheduledEvent, bool] | None:
+    existing_event_resolution = await resolve_existing_event_for_command(
+        guild=guild,
+        selected_event_value=selected_event_value,
+    )
+    if existing_event_resolution.error_message is not None:
         await interaction.followup.send(
-            f"Event was created, but posting RSVP message failed: {exc}",
+            existing_event_resolution.error_message,
             ephemeral=True,
         )
         return None
+    if existing_event_resolution.event is not None:
+        if not await ensure_event_post_permissions(
+            interaction=interaction,
+            guild=guild,
+            event_channel=event_channel,
+            bot=bot,
+            get_bot_member_fn=get_bot_member_fn,
+        ):
+            return None
+        print(
+            f"/event reused existing event {existing_event_resolution.event.id} "
+            f"for guild {guild.id} (source={existing_event_resolution.source})."
+        )
+        _upsert_cached_event_option(
+            guild_id=guild.id,
+            event=existing_event_resolution.event,
+        )
+        return existing_event_resolution.event, False
+
+    if not await ensure_event_creation_permissions(
+        interaction=interaction,
+        guild=guild,
+        event_channel=event_channel,
+        bot=bot,
+        get_bot_member_fn=get_bot_member_fn,
+    ):
+        return None
+    created_event = await create_scheduled_event(
+        interaction=interaction,
+        guild=guild,
+        event_input=event_input,
+    )
+    if created_event is None:
+        return None
+    cache_connected_event_id(guild_id=guild.id, event_id=created_event.id)
+    _upsert_cached_event_option(guild_id=guild.id, event=created_event)
+    print(f"/event created and cached event {created_event.id} for guild {guild.id}.")
+    return created_event, True
 
 
 async def handle_event_command(
@@ -297,6 +705,7 @@ async def handle_event_command(
     title: str,
     description: str,
     edition: app_commands.Choice[str] | None,
+    event: str,
     room_link: str | None,
     start_time: str | None,
     bot: commands.Bot,
@@ -353,22 +762,18 @@ async def handle_event_command(
         await interaction.followup.send(str(exc), ephemeral=True)
         return
 
-    if not await ensure_event_creation_permissions(
+    resolved_event = await resolve_or_create_event_for_command(
         interaction=interaction,
         guild=guild,
+        selected_event_value=event,
+        event_input=event_input,
         event_channel=event_channel,
         bot=bot,
         get_bot_member_fn=get_bot_member_fn,
-    ):
-        return
-
-    event_object = await create_scheduled_event(
-        interaction=interaction,
-        guild=guild,
-        event_input=event_input,
     )
-    if event_object is None:
+    if resolved_event is None:
         return
+    event_object, created_event = resolved_event
 
     event_url = build_event_url(guild_id=guild.id, event_id=event_object.id)
     selected_edition = edition.value if edition is not None else "Custom"
@@ -379,7 +784,7 @@ async def handle_event_command(
     room_snapshot = RoomSnapshot.from_url(event_input.room_url)
     view_state = ViewState(
         event_name=event_object.name,
-        start_unix=int(event_input.start_utc.timestamp()),
+        start_unix=event_start_unix(event=event_object),
         event_url=event_url,
         edition=selected_edition,
         edition_emoji=selected_edition_emoji,
@@ -399,6 +804,7 @@ async def handle_event_command(
         event_channel=event_channel,
         view=view,
         event_link_message=event_url,
+        created_event=created_event,
     )
     if rsvp_message is None:
         return
@@ -412,13 +818,18 @@ async def handle_event_command(
         bot=bot,
     )
     await add_default_reactions(rsvp_message)
-    await interaction.followup.send(
+    success_message = (
         (
             f"Created **{event_object.name}** and posted RSVP in "
             f"{event_channel.mention}: {rsvp_message.jump_url}"
-        ),
-        ephemeral=True,
+        )
+        if created_event
+        else (
+            f"Posted RSVP for **{event_object.name}** in "
+            f"{event_channel.mention}: {rsvp_message.jump_url}"
+        )
     )
+    await interaction.followup.send(success_message, ephemeral=True)
     if persistence_warning is not None:
         await interaction.followup.send(persistence_warning, ephemeral=True)
 
@@ -529,6 +940,7 @@ async def handle_previeweventdesign_command(
         interaction=interaction,
         event_channel=event_channel,
         view=view,
+        created_event=False,
     )
     if preview_message is None:
         return

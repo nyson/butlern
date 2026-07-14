@@ -93,6 +93,72 @@ def test_response_roundtrip(tmp_path: Path) -> None:
     store.remove_rsvp_response(message_id=101, user_id=7)
     assert store.get_rsvp_response(101, 7) is None
     assert store.all_responses(101) == {}
+def test_all_responses_preserves_signup_order(tmp_path: Path) -> None:
+    store = _store(tmp_path / "state.db")
+    store.upsert_message(
+        message_id=101,
+        channel_id=10,
+        guild_id=1,
+        view_state=_view_state(),
+    )
+    store.upsert_rsvp_response(
+        message_id=101,
+        user_id=30,
+        response=RsvpResponse(status="Available", role="Player", arrival_time=None),
+    )
+    store.upsert_rsvp_response(
+        message_id=101,
+        user_id=10,
+        response=RsvpResponse(status="Maybe", role="Storyteller", arrival_time=None),
+    )
+    store.upsert_rsvp_response(
+        message_id=101,
+        user_id=20,
+        response=RsvpResponse(status="Cant", role="Player", arrival_time=None),
+    )
+    store.upsert_rsvp_response(
+        message_id=101,
+        user_id=10,
+        response=RsvpResponse(status="Available", role="Storyteller", arrival_time="20:30"),
+    )
+
+    responses = store.all_responses(101)
+
+    assert list(responses.keys()) == [30, 10, 20]
+
+
+def test_all_responses_re_signup_after_cant_moves_user_to_end(tmp_path: Path) -> None:
+    store = _store(tmp_path / "state.db")
+    store.upsert_message(
+        message_id=101,
+        channel_id=10,
+        guild_id=1,
+        view_state=_view_state(),
+    )
+    store.upsert_rsvp_response(
+        message_id=101,
+        user_id=10,
+        response=RsvpResponse(status="Available", role="Player", arrival_time=None),
+    )
+    store.upsert_rsvp_response(
+        message_id=101,
+        user_id=20,
+        response=RsvpResponse(status="Available", role="Player", arrival_time=None),
+    )
+    store.upsert_rsvp_response(
+        message_id=101,
+        user_id=10,
+        response=RsvpResponse(status="Cant", role="Player", arrival_time=None),
+    )
+    store.upsert_rsvp_response(
+        message_id=101,
+        user_id=10,
+        response=RsvpResponse(status="Available", role="Player", arrival_time=None),
+    )
+
+    responses = store.all_responses(101)
+
+    assert list(responses.keys()) == [20, 10]
 
 
 def test_load_rebuilds_incompatible_schema(tmp_path: Path) -> None:

@@ -53,6 +53,19 @@ async def test_set_user_response_cant_clears_arrival_time() -> None:
     assert response.arrival_time is None
 
 
+async def test_set_user_response_after_cant_resets_signup_order() -> None:
+    view = _build_view()
+    await view.set_user_response(user_id=1, status="Available")
+    await view.set_user_response(user_id=2, status="Available")
+
+    assert await view.get_user_ids_for_status("Available") == [1, 2]
+
+    await view.set_user_response(user_id=1, status="Cant")
+    await view.set_user_response(user_id=1, status="Available")
+
+    assert await view.get_user_ids_for_status("Available") == [2, 1]
+
+
 def test_room_action_buttons_use_expected_layout_rows() -> None:
     view = _build_view()
 

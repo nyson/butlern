@@ -168,6 +168,11 @@ class AvailabilityView(discord.ui.View):
             if response is None:
                 self._ephemeral_responses.pop(user_id, None)
             else:
+                if self._should_reset_signup_order(
+                    existing=self._ephemeral_responses.get(user_id),
+                    updated=response,
+                ):
+                    self._ephemeral_responses.pop(user_id, None)
                 self._ephemeral_responses[user_id] = response
             return
         try:
@@ -185,7 +190,22 @@ class AvailabilityView(discord.ui.View):
             if response is None:
                 self._ephemeral_responses.pop(user_id, None)
             else:
+                if self._should_reset_signup_order(
+                    existing=self._ephemeral_responses.get(user_id),
+                    updated=response,
+                ):
+                    self._ephemeral_responses.pop(user_id, None)
                 self._ephemeral_responses[user_id] = response
+
+    def _should_reset_signup_order(
+        self,
+        *,
+        existing: RsvpResponse | None,
+        updated: RsvpResponse,
+    ) -> bool:
+        if updated.status == "Cant":
+            return True
+        return existing is not None and existing.status == "Cant"
 
     async def _render_state(self) -> RsvpRenderState:
         return RsvpRenderState(

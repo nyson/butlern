@@ -222,6 +222,7 @@ class RsvpMessageStore:
                     SELECT user_id, status, role, arrival_time
                     FROM rsvp_response
                     WHERE message_id = ?
+                    ORDER BY rowid ASC
                     """,
                     (message_id,),
                 ).fetchall()
@@ -242,8 +243,7 @@ class RsvpMessageStore:
         user_id: int,
         response: RsvpResponse,
     ) -> None:
-        self._execute(
-            """
+        upsert_sql = """
             INSERT INTO rsvp_response (
                 message_id,
                 user_id,
@@ -257,15 +257,41 @@ class RsvpMessageStore:
                 status = excluded.status,
                 role = excluded.role,
                 arrival_time = excluded.arrival_time
-            """,
-            (
-                message_id,
-                user_id,
-                response.status,
-                response.role,
-                response.arrival_time,
-            ),
+            """
+        params = (
+            message_id,
+            user_id,
+            response.status,
+            response.role,
+            response.arrival_time,
         )
+        try:
+            with self._connect() as connection:
+                existing_row = connection.execute(
+                    """
+                    SELECT status
+                    FROM rsvp_response
+                    WHERE message_id = ? AND user_id = ?
+                    """,
+                    (message_id, user_id),
+                ).fetchone()
+                existing_status = (
+                    cast(RsvpStatus, existing_row[0])
+                    if existing_row is not None and isinstance(existing_row[0], str)
+                    else None
+                )
+                if self._should_reset_signup_order(
+                    existing_status=existing_status,
+                    updated_status=response.status,
+                ):
+                    connection.execute(
+                        "DELETE FROM rsvp_response WHERE message_id = ? AND user_id = ?",
+                        (message_id, user_id),
+                    )
+                connection.execute(upsert_sql, params)
+                connection.commit()
+        except sqlite3.Error as exc:
+            raise OSError(f"Failed to persist RSVP state in {self.path}.") from exc
 
     def remove_rsvp_response(self, *, message_id: int, user_id: int) -> None:
         self._execute(
@@ -354,6 +380,16 @@ class RsvpMessageStore:
         role = cast(RsvpRole, str(row[1]))
         arrival_time = self._optional_str(row[2])
         return RsvpResponse(status=status, role=role, arrival_time=arrival_time)
+
+    def _should_reset_signup_order(
+        self,
+        *,
+        existing_status: RsvpStatus | None,
+        updated_status: RsvpStatus,
+    ) -> bool:
+        if updated_status == "Cant":
+            return True
+        return existing_status == "Cant"
 
     def _required_int(self, value: object, column: str) -> int:
         if isinstance(value, int):

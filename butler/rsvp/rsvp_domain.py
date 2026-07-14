@@ -92,10 +92,16 @@ def status_count(responses: dict[int, RsvpResponse], status: RsvpStatus) -> int:
 
 
 def mentions_for_status(responses: dict[int, RsvpResponse], status: RsvpStatus) -> str | None:
+    ordered_responses = [
+        (user_id, response)
+        for user_id, response in responses.items()
+        if response.status == status
+    ]
+    ordered_responses.sort(
+        key=lambda pair: 0 if pair[1].role == "Storyteller" else 1,
+    )
     mentions: list[str] = []
-    for user_id, response in responses.items():
-        if response.status != status:
-            continue
+    for user_id, response in ordered_responses:
 
         st_emoji = (response.role == "Storyteller" and f" {STORYTELLER_EMOJI}") or ""
         arrival = (response.arrival_time and f" ({response.arrival_time})") or ""

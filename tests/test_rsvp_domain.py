@@ -92,6 +92,20 @@ def test_mentions_for_status_truncates_past_fifteen() -> None:
     assert result is not None
     assert result.endswith("(+1 more)")
     assert result.count("<@") == 15
+def test_mentions_for_status_storytellers_first_then_signup_order() -> None:
+    responses = {
+        200: RsvpResponse(status="Available", role="Player"),
+        100: RsvpResponse(status="Available", role="Storyteller"),
+        300: RsvpResponse(status="Available", role="Storyteller"),
+        400: RsvpResponse(status="Available", role="Player"),
+    }
+    result = mentions_for_status(responses, "Available")
+    assert result is not None
+
+    # Storytellers come first, while preserving signup order within each group.
+    assert result.index("<@100>") < result.index("<@300>")
+    assert result.index("<@300>") < result.index("<@200>")
+    assert result.index("<@200>") < result.index("<@400>")
 
 
 # --- status_from_emoji / status_from_emojis ---------------------------------

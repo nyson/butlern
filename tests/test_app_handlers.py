@@ -8,13 +8,16 @@ pass) with `AsyncMock` surfaces we assert on. Module globals (`SETTINGS_STORE`,
 
 from __future__ import annotations
 
+import datetime as dt
 from collections.abc import Iterator
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
+import discord
 import pytest
 
 import butler.app as app
+import butler.rsvp.event_command as event_command
 import butler.rsvp.runtime as rsvp_runtime
 from butler.design import AVAILABLE_EMOJI, CANT_EMOJI, STORYTELLER_EMOJI
 from butler.rsvp.rsvp_store import StoredRsvpMessage
@@ -29,6 +32,7 @@ from tests.discord_mocks import (
     make_raw_reaction,
     make_reaction,
     make_role,
+    make_scheduled_event,
     make_text_channel,
     sent_text,
 )
@@ -53,6 +57,14 @@ def store() -> Iterator[MagicMock]:
         app.SETTINGS_STORE = original
         app.RSVP_MESSAGE_STORE = original_rsvp_store
 
+@pytest.fixture(autouse=True)
+def event_cache() -> Iterator[None]:
+    event_command.reset_connected_event_cache()
+    try:
+        yield
+    finally:
+        event_command.reset_connected_event_cache()
+
 
 @pytest.fixture
 def views() -> Iterator[dict[int, object]]:
@@ -76,6 +88,15 @@ def bot_member_ok(monkeypatch: pytest.MonkeyPatch) -> None:
         app,
         "get_bot_member",
         lambda guild, user: make_member(member_id=2))  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
+
+
+def _reusable_today_event(*, event_id: int, name: str) -> discord.ScheduledEvent:
+    return make_scheduled_event(
+        event_id=event_id,
+        name=name,
+        status=discord.EventStatus.active,
+        start_time=dt.datetime.now(dt.UTC),
+    )
 
 
 # --- /seteventchannel -------------------------------------------------------
@@ -166,7 +187,13 @@ async def test_seteventrole_save_failure(store: MagicMock) -> None:
 
 async def test_event_requires_guild() -> None:
     ix = make_interaction(guild=None, user=make_member())
-    await invoke(app.event, ix.interaction, title="t", description="d")
+    await invoke(
+        app.event,
+        ix.interaction,
+        title="t",
+        description="d",
+        event=event_command.CREATE_NEW_EVENT_CHOICE_VALUE,
+    )
     assert "must be used in a server" in sent_text(ix.response.send_message)
 
 
@@ -174,7 +201,13 @@ async def test_event_requires_member(monkeypatch: pytest.MonkeyPatch) -> None:
     # A plain user (not a Member) must fail the isinstance guard.
     non_member = MagicMock(spec=__import__("discord").User)
     ix = make_interaction(guild=make_guild(guild_id=1), user=non_member)
-    await invoke(app.event, ix.interaction, title="t", description="d")
+    await invoke(
+        app.event,
+        ix.interaction,
+        title="t",
+        description="d",
+        event=event_command.CREATE_NEW_EVENT_CHOICE_VALUE,
+    )
     assert "verify your server member permissions" in sent_text(ix.response.send_message)
 
 
@@ -184,14 +217,26 @@ async def test_event_permission_denied(store: MagicMock) -> None:
         guild=make_guild(guild_id=1),
         user=make_member(permissions=make_permissions(manage_guild=False)),
     )
-    await invoke(app.event, ix.interaction, title="t", description="d")
+    await invoke(
+        app.event,
+        ix.interaction,
+        title="t",
+        description="d",
+        event=event_command.CREATE_NEW_EVENT_CHOICE_VALUE,
+    )
     assert "behörigheten" in sent_text(ix.response.send_message)
 
 
 async def test_event_no_channel_configured(store: MagicMock) -> None:
     store.get_default_event_channel_id.return_value = None
     ix = make_interaction(guild=make_guild(guild_id=1), user=make_member())
-    await invoke(app.event, ix.interaction, title="t", description="d")
+    await invoke(
+        app.event,
+        ix.interaction,
+        title="t",
+        description="d",
+        event=event_command.CREATE_NEW_EVENT_CHOICE_VALUE,
+    )
     assert "No valid default event channel" in sent_text(ix.followup.send)
 
 
@@ -200,7 +245,14 @@ async def test_event_invalid_room_link_surfaces_error(store: MagicMock) -> None:
     ix = make_interaction(
         guild=make_guild(guild_id=1, channel=channel), user=make_member()
     )
-    await invoke(app.event, ix.interaction, title="t", description="d", room_link="not-a-url")
+    await invoke(
+        app.event,
+        ix.interaction,
+        title="t",
+        description="d",
+        event=event_command.CREATE_NEW_EVENT_CHOICE_VALUE,
+        room_link="not-a-url",
+    )
     assert "must be a full URL" in sent_text(ix.followup.send)
 
 
@@ -215,7 +267,13 @@ async def test_event_missing_bot_permissions(
     )
     channel = make_text_channel(channel_id=10, guild_id=1)
     ix = make_interaction(guild=make_guild(guild_id=1, channel=channel), user=make_member())
-    await invoke(app.event, ix.interaction, title="t", description="d")
+    await invoke(
+        app.event,
+        ix.interaction,
+        title="t",
+        description="d",
+        event=event_command.CREATE_NEW_EVENT_CHOICE_VALUE,
+    )
     assert "required permissions" in sent_text(ix.followup.send)
 
 
@@ -226,12 +284,193 @@ async def test_event_success_registers_view(
     channel = make_text_channel(channel_id=10, guild_id=1)
     guild = make_guild(guild_id=1, channel=channel)
     ix = make_interaction(guild=guild, user=make_member())
-    await invoke(app.event, ix.interaction, title="Game", description="d", start_time="23:59")
+    await invoke(
+        app.event,
+        ix.interaction,
+        title="Game",
+        description="d",
+        event=event_command.CREATE_NEW_EVENT_CHOICE_VALUE,
+        start_time="23:59",
+    )
     cast(Any, guild).create_scheduled_event.assert_awaited_once()
     # The posted RSVP message (id 999 from make_message) is tracked.
     assert 999 in views
     assert "Created" in sent_text(ix.followup.send)
 
+async def test_event_existing_event_autocomplete_filters_and_caps() -> None:
+    now_utc = dt.datetime.now(dt.UTC)
+    scheduled_events = [
+        _reusable_today_event(event_id=index, name=f"Game {index}")
+        for index in range(1, 30)
+    ] + [
+        make_scheduled_event(
+            event_id=5000,
+            name="Old Game",
+            status=discord.EventStatus.completed,
+        ),
+        make_scheduled_event(
+            event_id=6000,
+            name="Tomorrow Game",
+            start_time=now_utc + dt.timedelta(days=1),
+        ),
+    ]
+    guild = make_guild(guild_id=1, scheduled_events=scheduled_events)
+    cache_bot = MagicMock()
+    cache_bot.guilds = [guild]
+    await event_command.warmup_connected_event_cache(bot=cache_bot)
+    ix = make_interaction(guild=guild, user=make_member())
+
+    choices = await event_command.autocomplete_existing_event(
+        ix.interaction,
+        "game",
+    )
+
+    assert len(choices) == 25
+    assert choices[0].name == event_command.CREATE_NEW_EVENT_CHOICE_LABEL
+    assert choices[0].value == event_command.CREATE_NEW_EVENT_CHOICE_VALUE
+    assert all("Game" in choice.name for choice in choices[1:])
+    assert all("svensk tid" not in choice.name for choice in choices[1:])
+    assert all(choice.value not in {"5000", "6000"} for choice in choices)
+    for choice in choices[1:]:
+        name_parts = choice.name.rsplit(" — ", 1)
+        assert len(name_parts) == 2
+        assert len(name_parts[1]) == 5
+        assert name_parts[1][2] == ":"
+
+async def test_event_existing_event_autocomplete_does_not_fetch_api_per_keystroke() -> None:
+    guild = make_guild(
+        guild_id=1,
+        scheduled_events=[make_scheduled_event(event_id=1, name="Game 1")],
+    )
+    ix = make_interaction(guild=guild, user=make_member())
+
+    choices = await event_command.autocomplete_existing_event(
+        ix.interaction,
+        "game",
+    )
+    assert len(choices) == 1
+    assert choices[0].name == event_command.CREATE_NEW_EVENT_CHOICE_LABEL
+    assert choices[0].value == event_command.CREATE_NEW_EVENT_CHOICE_VALUE
+    cast(Any, guild).fetch_scheduled_events.assert_not_awaited()
+
+def test_event_choice_label_uses_swedish_summer_time() -> None:
+    event = make_scheduled_event(
+        event_id=7000,
+        name="Summer Game",
+        start_time=dt.datetime(2026, 7, 14, 17, 0, tzinfo=dt.UTC),
+    )
+
+    choice_name = event_command._event_choice_name(event)
+
+    assert choice_name == "Summer Game — 19:00"
+
+
+async def test_event_reuses_selected_existing_event(
+    views: dict[int, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        app,
+        "get_bot_member",
+        lambda guild, user: make_member(member_id=2),  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
+    )
+    channel = make_text_channel(channel_id=10, guild_id=1)
+    selected_event = _reusable_today_event(event_id=321, name="Existing Event")
+    guild = make_guild(
+        guild_id=1,
+        channel=channel,
+        scheduled_events=[selected_event],
+    )
+    ix = make_interaction(guild=guild, user=make_member())
+
+    await invoke(
+        app.event,
+        ix.interaction,
+        title="Game",
+        description="d",
+        event="321",
+    )
+    cast(Any, guild).create_scheduled_event.assert_not_called()
+    assert 999 in views
+    assert "Posted RSVP for **Existing Event**" in sent_text(ix.followup.send)
+
+
+async def test_event_selected_existing_event_stale_returns_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        app,
+        "get_bot_member",
+        lambda guild, user: make_member(member_id=2),  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
+    )
+    channel = make_text_channel(channel_id=10, guild_id=1)
+    guild = make_guild(guild_id=1, channel=channel, scheduled_events=[])
+    ix = make_interaction(guild=guild, user=make_member())
+
+    await invoke(
+        app.event,
+        ix.interaction,
+        title="Game",
+        description="d",
+        event="321",
+    )
+    cast(Any, guild).create_scheduled_event.assert_not_called()
+    assert "couldn't find that selected event" in sent_text(ix.followup.send)
+
+
+async def test_event_create_option_uses_old_create_behavior(
+    views: dict[int, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        app,
+        "get_bot_member",
+        lambda guild, user: make_member(member_id=2),  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
+    )
+    channel = make_text_channel(channel_id=10, guild_id=1)
+    reusable_event = make_scheduled_event(event_id=777, name="Lookup Event")
+    guild = make_guild(
+        guild_id=1,
+        channel=channel,
+        scheduled_events=[reusable_event],
+    )
+    ix = make_interaction(guild=guild, user=make_member())
+    await invoke(
+        app.event,
+        ix.interaction,
+        title="Game",
+        description="d",
+        event=event_command.CREATE_NEW_EVENT_CHOICE_VALUE,
+    )
+    cast(Any, guild).create_scheduled_event.assert_awaited_once()
+    assert 999 in views
+    assert "Created" in sent_text(ix.followup.send)
+
+
+async def test_on_ready_warms_connected_event_cache(
+    store: MagicMock,
+    views: dict[int, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _ = store
+    _ = views
+    hydrate = AsyncMock(return_value=True)
+    monkeypatch.setattr(rsvp_runtime, "hydrate_persistent_views", hydrate)
+    warm_event = _reusable_today_event(event_id=111, name="Warm Event")
+    bot = MagicMock()
+    bot.user = MagicMock()
+    bot.user.id = 1
+    bot.guilds = [
+        make_guild(guild_id=1, scheduled_events=[warm_event]),
+        make_guild(guild_id=2, scheduled_events=[]),
+    ]
+    monkeypatch.setattr(app, "bot", bot)
+
+    app._BOT_EVENT_STATE.rsvp_views_hydrated = False
+    await app.on_ready()
+
+    assert event_command.cached_connected_event_id(guild_id=1) == 111
+    assert event_command.cached_connected_event_id(guild_id=2) is None
 
 # --- /previeweventdesign ----------------------------------------------------
 

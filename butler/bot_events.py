@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import discord
 from discord.ext import commands
 
+import butler.rsvp.event_command as rsvp_event_command
 import butler.rsvp.runtime as rsvp_runtime
 from butler.config import DiscordConfig
 from butler.permissions import guild_sync_access_message
@@ -119,6 +120,7 @@ async def _handle_on_ready(*, deps: BotEventDependencies, state: BotEventState) 
         settings_store=deps.get_settings_store_fn(),
         view_store=deps.get_view_store_fn(),
     )
+    await rsvp_event_command.warmup_connected_event_cache(bot=runtime_bot)
 
 
 async def _handle_on_guild_join(*, deps: BotEventDependencies, guild: discord.Guild) -> None:

@@ -90,6 +90,15 @@ def bot_member_ok(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda guild, user: make_member(member_id=2))  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
 
 
+def _reusable_today_event(*, event_id: int, name: str) -> discord.ScheduledEvent:
+    return make_scheduled_event(
+        event_id=event_id,
+        name=name,
+        status=discord.EventStatus.active,
+        start_time=dt.datetime.now(dt.UTC),
+    )
+
+
 # --- /seteventchannel -------------------------------------------------------
 
 
@@ -291,7 +300,7 @@ async def test_event_success_registers_view(
 async def test_event_existing_event_autocomplete_filters_and_caps() -> None:
     now_utc = dt.datetime.now(dt.UTC)
     scheduled_events = [
-        make_scheduled_event(event_id=index, name=f"Game {index}")
+        _reusable_today_event(event_id=index, name=f"Game {index}")
         for index in range(1, 30)
     ] + [
         make_scheduled_event(
@@ -366,7 +375,7 @@ async def test_event_reuses_selected_existing_event(
         lambda guild, user: make_member(member_id=2),  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
     )
     channel = make_text_channel(channel_id=10, guild_id=1)
-    selected_event = make_scheduled_event(event_id=321, name="Existing Event")
+    selected_event = _reusable_today_event(event_id=321, name="Existing Event")
     guild = make_guild(
         guild_id=1,
         channel=channel,
@@ -447,8 +456,7 @@ async def test_on_ready_warms_connected_event_cache(
     _ = views
     hydrate = AsyncMock(return_value=True)
     monkeypatch.setattr(rsvp_runtime, "hydrate_persistent_views", hydrate)
-
-    warm_event = make_scheduled_event(event_id=111, name="Warm Event")
+    warm_event = _reusable_today_event(event_id=111, name="Warm Event")
     bot = MagicMock()
     bot.user = MagicMock()
     bot.user.id = 1

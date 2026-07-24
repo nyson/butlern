@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Callable, MutableMapping
+from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import dataclass
-from typing import Final, Literal
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from typing import Final, Literal, cast
+from zoneinfo import ZoneInfo
 
 import discord
 from discord import app_commands
@@ -32,6 +32,10 @@ from butler.permissions import (
     member_can_manage_events,
     permission_denied_message,
 )
+from butler.rsvp.recurrence_adapter import (
+    RecurrenceRulePayload,
+    fetch_recurrence_rules_for_guild,
+)
 from butler.rsvp.rsvp_domain import RoomSnapshot
 from butler.rsvp.rsvp_store import RsvpMessageStore
 from butler.rsvp.rsvp_view import AvailabilityView
@@ -55,12 +59,10 @@ _CONNECTED_EVENT_CACHE: dict[int, int] = {}
 _AUTOCOMPLETE_EVENT_CACHE: dict[int, list[tuple[str, str]]] = {}
 CREATE_NEW_EVENT_CHOICE_LABEL: Final[str] = "Låt Butlern skapa ett evenemang!"
 CREATE_NEW_EVENT_CHOICE_VALUE: Final[str] = "__butler_create_new_event__"
-_SWEDISH_TIMEZONE: dt.tzinfo
-
-try:
-    _SWEDISH_TIMEZONE = ZoneInfo("Europe/Stockholm")
-except ZoneInfoNotFoundError:
-    _SWEDISH_TIMEZONE = dt.timezone(dt.timedelta(hours=1), name="CET")
+_SWEDISH_TIMEZONE: Final[dt.tzinfo] = ZoneInfo("Europe/Stockholm")
+BOT_PERMISSION_VERIFY_FAILURE_MESSAGE: Final[str] = (
+    "I couldn't verify my server permissions. Re-invite the bot and try again."
+)
 
 EventResolutionSource = Literal["selected", "cache", "lookup"]
 
@@ -145,19 +147,167 @@ def _event_start_utc(event: discord.ScheduledEvent) -> dt.datetime:
     return _coerce_utc(event.start_time)
 
 
+def _parse_weekdays(value: object) -> set[int] | None:
+    if not isinstance(value, list):
+        return None
+    if not value:
+        return set()
+    parsed: set[int] = set()
+    weekday_values = cast(list[object], value)
+    for weekday_value in weekday_values:
+        if not isinstance(weekday_value, int):
+            return None
+        if weekday_value < 0 or weekday_value > 6:
+            return None
+        parsed.add(weekday_value)
+    return parsed
+
+
+def _parse_positive_int(value: object, *, default: int) -> int | None:
+    if value is None:
+        return default
+    if not isinstance(value, int):
+        return None
+    if value < 1:
+        return None
+    return value
+
+
+def _parse_date_value(value: object) -> dt.date | None:
+    if value is None:
+        return None
+    if isinstance(value, dt.datetime):
+        return _coerce_utc(value).date()
+    if isinstance(value, dt.date):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return _coerce_utc(parsed).date()
+    return None
+
+
+def _is_weekly_frequency(value: object) -> bool:
+    if isinstance(value, str):
+        return value.casefold() == "weekly"
+    return value == 2
+
+
+def _allowed_weekdays_for_weekly_rule(
+    *,
+    recurrence_rule: Mapping[str, object],
+    anchor_weekday: int,
+) -> set[int] | None:
+    if "by_weekday" not in recurrence_rule:
+        return {anchor_weekday}
+    weekdays = _parse_weekdays(recurrence_rule.get("by_weekday"))
+    if weekdays is None or not weekdays:
+        return None
+    return weekdays
+
+
+def _weekly_rule_matches_target_date(
+    *,
+    recurrence_rule: Mapping[str, object],
+    anchor_date: dt.date,
+    target_local_date: dt.date,
+) -> bool:
+    if target_local_date < anchor_date:
+        return False
+
+    interval = _parse_positive_int(recurrence_rule.get("interval"), default=1)
+    if interval is None:
+        return False
+
+    allowed_weekdays = _allowed_weekdays_for_weekly_rule(
+        recurrence_rule=recurrence_rule,
+        anchor_weekday=anchor_date.weekday(),
+    )
+    if allowed_weekdays is None:
+        return False
+    if target_local_date.weekday() not in allowed_weekdays:
+        return False
+
+    end_date = _parse_date_value(recurrence_rule.get("end"))
+    if end_date is not None and target_local_date > end_date:
+        return False
+
+    days_delta = (target_local_date - anchor_date).days
+    weeks_delta = days_delta // 7
+    return weeks_delta % interval == 0
+
+
+def _recurrence_rule_payload_for_event(
+    event: discord.ScheduledEvent,
+) -> Mapping[str, object] | None:
+    recurrence_value = getattr(event, "recurrence_rule", None)
+    if recurrence_value is None:
+        return None
+    if isinstance(recurrence_value, Mapping):
+        return cast(Mapping[str, object], recurrence_value)
+    payload: dict[str, object] = {}
+    for key in ("frequency", "interval", "by_weekday", "end"):
+        if hasattr(recurrence_value, key):
+            payload[key] = getattr(recurrence_value, key)
+    return payload or None
+
+
+def occurrence_start_utc_for_local_date(
+    *,
+    event_start_utc: dt.datetime,
+    target_local_date: dt.date,
+    local_timezone: dt.tzinfo,
+    recurrence_rule: Mapping[str, object] | None = None,
+) -> dt.datetime | None:
+    event_start_local = event_start_utc.astimezone(local_timezone)
+    anchor_date = event_start_local.date()
+    if recurrence_rule is None:
+        if anchor_date != target_local_date:
+            return None
+        return event_start_utc
+
+    if not _is_weekly_frequency(recurrence_rule.get("frequency")):
+        return None
+    if not _weekly_rule_matches_target_date(
+        recurrence_rule=recurrence_rule,
+        anchor_date=anchor_date,
+        target_local_date=target_local_date,
+    ):
+        return None
+
+    occurrence_local = dt.datetime.combine(
+        target_local_date,
+        event_start_local.timetz().replace(tzinfo=None),
+        tzinfo=local_timezone,
+    )
+    return occurrence_local.astimezone(dt.UTC)
+
+
 def _is_reusable_scheduled_event(
     *,
     event: discord.ScheduledEvent,
     now_utc: dt.datetime,
+    recurrence_rule: Mapping[str, object] | None = None,
 ) -> bool:
     if event.status not in {discord.EventStatus.active, discord.EventStatus.scheduled}:
         return False
     event_start_utc = _event_start_utc(event)
-    event_start_swedish = event_start_utc.astimezone(_SWEDISH_TIMEZONE)
     now_swedish = now_utc.astimezone(_SWEDISH_TIMEZONE)
-    if event_start_swedish.date() != now_swedish.date():
+    occurrence_start_utc = occurrence_start_utc_for_local_date(
+        event_start_utc=event_start_utc,
+        target_local_date=now_swedish.date(),
+        local_timezone=_SWEDISH_TIMEZONE,
+        recurrence_rule=(
+            recurrence_rule
+            if recurrence_rule is not None
+            else _recurrence_rule_payload_for_event(event)
+        ),
+    )
+    if occurrence_start_utc is None:
         return False
-    return not (event.status == discord.EventStatus.scheduled and event_start_utc < now_utc)
+    return not (event.status == discord.EventStatus.scheduled and occurrence_start_utc < now_utc)
 
 
 def _event_sort_key(event: discord.ScheduledEvent) -> tuple[int, float, int]:
@@ -175,11 +325,18 @@ async def reusable_scheduled_events_for_guild(
     except (discord.Forbidden, discord.HTTPException):
         return []
 
+    recurrence_rules: dict[int, RecurrenceRulePayload] = await fetch_recurrence_rules_for_guild(
+        guild=guild,
+    )
     now_utc = dt.datetime.now(dt.UTC)
     reusable_events = [
         event
         for event in events
-        if _is_reusable_scheduled_event(event=event, now_utc=now_utc)
+        if _is_reusable_scheduled_event(
+            event=event,
+            now_utc=now_utc,
+            recurrence_rule=recurrence_rules.get(event.id),
+        )
     ]
     reusable_events.sort(key=_event_sort_key)
     return reusable_events
@@ -205,6 +362,7 @@ def _event_choice_name(event: discord.ScheduledEvent) -> str:
     return f"{raw_name[:MAX_EVENT_CHOICE_NAME_LENGTH - 1]}…"
 
 
+# NOSONAR - discord.py autocomplete callback is async by API contract.
 async def autocomplete_existing_event(
     interaction: discord.Interaction,
     current: str,
@@ -463,7 +621,7 @@ async def ensure_event_creation_permissions(
     bot_member = get_bot_member_fn(guild, bot.user)
     if bot_member is None:
         await interaction.followup.send(
-            "I couldn't verify my server permissions. Re-invite the bot and try again.",
+            BOT_PERMISSION_VERIFY_FAILURE_MESSAGE,
             ephemeral=True,
         )
         return False
@@ -892,7 +1050,7 @@ async def handle_previeweventdesign_command(
     bot_member = get_bot_member_fn(guild, bot.user)
     if bot_member is None:
         await interaction.followup.send(
-            "I couldn't verify my server permissions. Re-invite the bot and try again.",
+            BOT_PERMISSION_VERIFY_FAILURE_MESSAGE,
             ephemeral=True,
         )
         return

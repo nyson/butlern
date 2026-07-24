@@ -60,6 +60,9 @@ _AUTOCOMPLETE_EVENT_CACHE: dict[int, list[tuple[str, str]]] = {}
 CREATE_NEW_EVENT_CHOICE_LABEL: Final[str] = "Låt Butlern skapa ett evenemang!"
 CREATE_NEW_EVENT_CHOICE_VALUE: Final[str] = "__butler_create_new_event__"
 _SWEDISH_TIMEZONE: Final[dt.tzinfo] = ZoneInfo("Europe/Stockholm")
+BOT_PERMISSION_VERIFY_FAILURE_MESSAGE: Final[str] = (
+    "I couldn't verify my server permissions. Re-invite the bot and try again."
+)
 
 EventResolutionSource = Literal["selected", "cache", "lookup"]
 
@@ -150,7 +153,8 @@ def _parse_weekdays(value: object) -> set[int] | None:
     if not value:
         return set()
     parsed: set[int] = set()
-    for weekday_value in value:
+    weekday_values = cast(list[object], value)
+    for weekday_value in weekday_values:
         if not isinstance(weekday_value, int):
             return None
         if weekday_value < 0 or weekday_value > 6:
@@ -358,6 +362,7 @@ def _event_choice_name(event: discord.ScheduledEvent) -> str:
     return f"{raw_name[:MAX_EVENT_CHOICE_NAME_LENGTH - 1]}…"
 
 
+# NOSONAR - discord.py autocomplete callback is async by API contract.
 async def autocomplete_existing_event(
     interaction: discord.Interaction,
     current: str,
@@ -616,7 +621,7 @@ async def ensure_event_creation_permissions(
     bot_member = get_bot_member_fn(guild, bot.user)
     if bot_member is None:
         await interaction.followup.send(
-            "I couldn't verify my server permissions. Re-invite the bot and try again.",
+            BOT_PERMISSION_VERIFY_FAILURE_MESSAGE,
             ephemeral=True,
         )
         return False
@@ -1045,7 +1050,7 @@ async def handle_previeweventdesign_command(
     bot_member = get_bot_member_fn(guild, bot.user)
     if bot_member is None:
         await interaction.followup.send(
-            "I couldn't verify my server permissions. Re-invite the bot and try again.",
+            BOT_PERMISSION_VERIFY_FAILURE_MESSAGE,
             ephemeral=True,
         )
         return

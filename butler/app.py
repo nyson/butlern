@@ -1,4 +1,5 @@
 from __future__ import annotations
+import datetime as dt
 
 import discord
 from discord import app_commands
@@ -17,7 +18,12 @@ from butler.discord_helpers import (
 from butler.permissions import find_onboarding_channel
 from butler.rsvp.rsvp_store import RsvpMessageStore
 from butler.rsvp.rsvp_view import AvailabilityView
+from butler.rsvp.types import ViewState
+from butler.rsvp2.EventMessageView import EventMessageView
+from butler.rsvp2.controller import RsvpController
+import butler.domains.rsvp.store as rsvp_store
 from butler.settings_store import GuildSettingsStore
+
 
 CONFIG = load_config()
 _force_guild_sync = False
@@ -37,11 +43,8 @@ _REGISTERED_BOT_EVENTS = bot_events.register_bot_events(
     get_active_views_fn=lambda: ACTIVE_RSVP_VIEWS,
     get_settings_store_fn=lambda: SETTINGS_STORE,
     get_view_store_fn=lambda: RSVP_MESSAGE_STORE,
-    get_bot_member_fn=lambda guild, bot_user: get_bot_member(guild, bot_user),
-    find_onboarding_channel_fn=lambda guild, bot_member: find_onboarding_channel(
-        guild,
-        bot_member,
-    ),
+    get_bot_member_fn=get_bot_member,
+    find_onboarding_channel_fn=find_onboarding_channel,
     onboarding_message=ONBOARDING_MESSAGE,
 )
 on_ready = _REGISTERED_BOT_EVENTS.on_ready
@@ -50,6 +53,32 @@ on_raw_reaction_add = _REGISTERED_BOT_EVENTS.on_raw_reaction_add
 on_raw_reaction_remove = _REGISTERED_BOT_EVENTS.on_raw_reaction_remove
 setup_hook = _REGISTERED_BOT_EVENTS.setup_hook
 
+
+@bot.tree.command(
+        name="event2"
+)
+@app_commands.guild_only()
+@app_commands.default_permissions(manage_guild=True)
+@app_commands.describe(
+    title="event title"
+)
+async def event2(
+    interaction: discord.Interaction,
+    title: str) -> None:
+    st = ViewState(
+        event_name="hej",
+        start_unix=int(dt.datetime.now(dt.UTC).timestamp()),
+        event_url="ett event.com",
+        edition="bmr",
+        edition_emoji="❣",
+        room_state="pending",
+        room_url="ett rum.com",
+        edition_image_url=None,
+        event_description="coola eventet"
+    )
+    await interaction.response.send_message(
+        view=EventMessageView(st, RsvpController(store=rsvp_store.RsvpMessageStore.load(PERSISTANCE_PATH))),
+        ephemeral=True)
 
 @bot.tree.command(
     name="seteventchannel",
@@ -118,6 +147,7 @@ async def event(
     room_link: str | None = None,
     start_time: str | None = None,
 ) -> None:
+    
     await rsvp_event_command.handle_event_command(
         interaction=interaction,
         title=title,

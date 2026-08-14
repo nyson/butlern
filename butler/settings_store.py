@@ -8,6 +8,8 @@ from typing import Final
 
 from discord.utils import deprecated
 
+from butler.base import Store
+
 SCHEMA_SQL: Final[str] = """
 CREATE TABLE IF NOT EXISTS guild_settings (
     guild_id INTEGER PRIMARY KEY,
@@ -18,7 +20,7 @@ CREATE TABLE IF NOT EXISTS guild_settings (
 
 
 @dataclass
-class GuildSettingsStore:
+class GuildSettingsStore(Store):
     path: Path
 
     @classmethod

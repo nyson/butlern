@@ -5,9 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, cast
 
-from butler.base import Store
-from butler.rsvp.rsvp_domain import RsvpResponse
-from butler.rsvp.types import RoomState, RsvpRole, RsvpStatus, ViewState
+from butler.domains.rsvp.domain import RsvpResponse
+from butler.domains.rsvp.types import RoomState, RsvpRole, RsvpStatus, ViewState
 
 SCHEMA_SQL: Final[str] = """
 CREATE TABLE IF NOT EXISTS rsvp_message (
@@ -46,7 +45,7 @@ class StoredRsvpMessage:
 
 
 @dataclass(frozen=True)
-class RsvpMessageStore(Store):
+class RsvpMessageStore:
     path: Path
 
     @classmethod

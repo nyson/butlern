@@ -35,8 +35,9 @@ def _normalize_interval(value: object) -> int | None:
 def _normalize_by_weekday(value: object) -> list[int] | None:
     if not isinstance(value, list):
         return None
+
     normalized: list[int] = []
-    for weekday in value:
+    for weekday in value: # pyright: ignore[reportUnknownVariableType]
         if not isinstance(weekday, int):
             return None
         if weekday < 0 or weekday > 6:
@@ -117,7 +118,7 @@ async def _fetch_raw_scheduled_events(guild: discord.Guild) -> list[Mapping[str,
 
     return [
         cast(Mapping[str, object], event)
-        for event in raw_events
+        for event in raw_events # pyright: ignore[reportUnknownVariableType]
         if isinstance(event, Mapping)
     ]
 

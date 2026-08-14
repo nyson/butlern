@@ -23,7 +23,8 @@ dev = [
     "ruff (>=0.15.17,<0.16.0)",
     "mypy (>=2.1.0,<3.0.0)",
     "pytest (>=8.0,<9.0)",
-    "pytest-asyncio (>=0.24,<0.25)"
+    "pytest-asyncio (>=0.24,<0.25)",
+    "pyright (>=1.1.411,<2.0.0)"
 ]
 
 [tool.pytest.ini_options]

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
+import sys
+import time
 from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import dataclass
 from typing import Final, Literal, cast
 from zoneinfo import ZoneInfo
 
 import discord
-from discord import app_commands
+from discord import Guild, app_commands
 from discord.ext import commands
 
 import butler.rsvp.runtime as rsvp_runtime
@@ -41,6 +44,9 @@ from butler.rsvp.rsvp_store import RsvpMessageStore
 from butler.rsvp.rsvp_view import AvailabilityView
 from butler.rsvp.types import ViewState
 from butler.settings_store import GuildSettingsStore
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(stream=sys.stderr)
 
 BOTC_EDITIONS: Final[tuple[str, ...]] = (
     "Trouble Brewing",
@@ -321,6 +327,7 @@ async def reusable_scheduled_events_for_guild(
     guild: discord.Guild,
 ) -> list[discord.ScheduledEvent]:
     try:
+        print("Fetching scheduled events...")
         events = await guild.fetch_scheduled_events(with_counts=False)
     except (discord.Forbidden, discord.HTTPException):
         return []
@@ -367,33 +374,40 @@ async def autocomplete_existing_event(
     interaction: discord.Interaction,
     current: str,
 ) -> list[app_commands.Choice[str]]:
-    guild = interaction.guild
-    if guild is None:
+    try:
+        guild = interaction.guild
+        if guild is None:
+            return [
+                app_commands.Choice(
+                    name=CREATE_NEW_EVENT_CHOICE_LABEL,
+                    value=CREATE_NEW_EVENT_CHOICE_VALUE,
+                ),
+            ]
+        start = time.time()
+        await warmup_connected_event_cache(guilds=[guild])
+        logger.error(f"warmup cache took {time.time() - start}")
+        candidates = _AUTOCOMPLETE_EVENT_CACHE.get(guild.id, [])
+        print(f"got candidates {candidates}")
+        query = current.strip().casefold()
+        if query:
+            candidates = [
+                option
+                for option in candidates
+                if query in option[0].casefold() or query in option[1]
+            ]
+        event_choices = [
+            app_commands.Choice(name=name, value=value)
+            for name, value in candidates[:MAX_EVENT_AUTOCOMPLETE_CHOICES]
+        ]
         return [
             app_commands.Choice(
                 name=CREATE_NEW_EVENT_CHOICE_LABEL,
                 value=CREATE_NEW_EVENT_CHOICE_VALUE,
             ),
+            *event_choices[: max(0, MAX_EVENT_AUTOCOMPLETE_CHOICES - 1)],
         ]
-    candidates = _AUTOCOMPLETE_EVENT_CACHE.get(guild.id, [])
-    query = current.strip().casefold()
-    if query:
-        candidates = [
-            option
-            for option in candidates
-            if query in option[0].casefold() or query in option[1]
-        ]
-    event_choices = [
-        app_commands.Choice(name=name, value=value)
-        for name, value in candidates[:MAX_EVENT_AUTOCOMPLETE_CHOICES]
-    ]
-    return [
-        app_commands.Choice(
-            name=CREATE_NEW_EVENT_CHOICE_LABEL,
-            value=CREATE_NEW_EVENT_CHOICE_VALUE,
-        ),
-        *event_choices[: max(0, MAX_EVENT_AUTOCOMPLETE_CHOICES - 1)],
-    ]
+    except Exception as e:
+        return [app_commands.Choice(name=f"ett fel har hänt: {e!r}", value="fel")]
 
 
 def _parse_selected_event_id(value: str) -> int | None:
@@ -499,11 +513,11 @@ def event_start_unix(
 ) -> int:
     return int(_coerce_utc(event.start_time).timestamp())
 
-
-async def warmup_connected_event_cache(*, bot: commands.Bot) -> None:
+async def warmup_connected_event_cache(*, guilds: list[Guild]) -> None:
     warmed = 0
     empty = 0
-    for guild in bot.guilds:
+
+    for guild in guilds:
         candidates = await reusable_scheduled_events_for_guild(guild=guild)
         _cache_reusable_events_for_guild(
             guild_id=guild.id,

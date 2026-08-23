@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, cast
 
+from butler.base import Store
 from butler.domains.rsvp.domain import RsvpResponse
 from butler.domains.rsvp.types import RoomState, RsvpRole, RsvpStatus, ViewState
 
@@ -46,7 +47,7 @@ class StoredRsvpMessage:
 
 
 @dataclass(frozen=True)
-class RsvpMessageStore:
+class RsvpMessageStore(Store):
     path: Path
 
     @classmethod

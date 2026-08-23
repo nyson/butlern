@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import cast
-from unittest.mock import MagicMock
 
 import discord
 
 from butler.caches import events as events_cache
+from butler.caches.events.option_cache import AUTOCOMPLETE_EVENT_CACHE, upsert_cached_event_option
 from tests.discord_mocks import make_scheduled_event
+
+# Fixed instants only — gateway reusability uses wall-clock `datetime.now`, so
+# "is this event reusable right now?" is not covered here (see arch.md).
+_STATIC_START = dt.datetime(2026, 6, 15, 18, 0, tzinfo=dt.UTC)
 
 
 def setup_function() -> None:
@@ -20,40 +23,37 @@ def _event_with_guild(
     guild_id: int,
     name: str = "Game",
     status: discord.EventStatus = discord.EventStatus.scheduled,
-    start_time: dt.datetime | None = None,
+    start_time: dt.datetime = _STATIC_START,
 ) -> discord.ScheduledEvent:
-    event = make_scheduled_event(
+    return make_scheduled_event(
         event_id=event_id,
         name=name,
         status=status,
-        start_time=start_time or (dt.datetime.now(dt.UTC) + dt.timedelta(hours=2)),
+        start_time=start_time,
+        guild_id=guild_id,
     )
-    guild = MagicMock()
-    guild.id = guild_id
-    event.guild = guild
-    event.guild_id = guild_id
-    return cast(discord.ScheduledEvent, event)
 
 
-def test_gateway_upsert_adds_reusable_event() -> None:
-    event = _event_with_guild(event_id=10, guild_id=1, name="Tonight")
-    events_cache.handle_gateway_scheduled_event_upsert(event, action="create")
-    options = events_cache.AUTOCOMPLETE_EVENT_CACHE.get(1, [])
-    assert any(value == "10" for _name, value in options)
+def _seed_cached_option(*, guild_id: int, event: discord.ScheduledEvent) -> None:
+    upsert_cached_event_option(guild_id=guild_id, event=event)
 
 
 def test_gateway_delete_removes_event() -> None:
     event = _event_with_guild(event_id=11, guild_id=2, name="Soon")
-    events_cache.handle_gateway_scheduled_event_upsert(event, action="create")
+    _seed_cached_option(guild_id=2, event=event)
+
     events_cache.handle_gateway_scheduled_event_delete(event)
-    options = events_cache.AUTOCOMPLETE_EVENT_CACHE.get(2, [])
+
+    options = AUTOCOMPLETE_EVENT_CACHE.get(2, [])
     assert all(value != "11" for _name, value in options)
 
 
 def test_gateway_update_drops_completed_event() -> None:
     event = _event_with_guild(event_id=12, guild_id=3, name="Done")
-    events_cache.handle_gateway_scheduled_event_upsert(event, action="create")
+    _seed_cached_option(guild_id=3, event=event)
     event.status = discord.EventStatus.completed
+
     events_cache.handle_gateway_scheduled_event_upsert(event, action="update")
-    options = events_cache.AUTOCOMPLETE_EVENT_CACHE.get(3, [])
+
+    options = AUTOCOMPLETE_EVENT_CACHE.get(3, [])
     assert all(value != "12" for _name, value in options)

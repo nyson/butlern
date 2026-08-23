@@ -452,3 +452,20 @@ butler/
 - Line-by-line inventory of every legacy helper
 - Swedish user-facing copy samples and full test checklists (see `agents.md`)
 - Wall-clock cron semantics for jobs (interval-from-start is enough until a product requirement says otherwise)
+
+## Shortcomings
+
+### Event reusability is tied to wall-clock time
+
+`is_reusable_scheduled_event` / gateway upsert decide "reusable now" with
+`datetime.datetime.now(datetime.UTC)` inside production code.
+
+Unit tests therefore cannot stably assert the "add reusable event to autocomplete
+cache" path without either:
+
+- dynamic "now" in tests (brittle around midnight / Swedish date boundaries), or
+- a mockable time/clock seam injected into the cache/gateway layer.
+
+**Out of scope for now.** Prefer static datetimes in tests and seed the option
+cache directly when exercising delete/non-reusable update paths. Add a small
+clock dependency later if we want full gateway upsert coverage in unit tests.

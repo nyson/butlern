@@ -1,4 +1,4 @@
-"""Integration checks: rsvp2 is wired into the bot app module."""
+"""Integration checks: rsvp is wired into the bot app module."""
 
 from __future__ import annotations
 
@@ -12,13 +12,13 @@ import butler.app as app
 from butler.domains.result import Ok
 from butler.domains.rsvp.store import RsvpMessageStore
 from butler.domains.rsvp.types import ViewState
-from butler.rsvp2 import runtime as rsvp2_runtime
-from butler.rsvp2.controller import RsvpController
-from butler.rsvp2.view.event_message_view import EventMessageView, RoomActions
-from butler.rsvp2.view.event_select import build_event_select_options
+from butler.rsvp import runtime as rsvp_runtime
+from butler.rsvp.controller import RsvpController
+from butler.rsvp.view.event_message_view import EventMessageView, RoomActions
+from butler.rsvp.view.event_select import build_event_select_options
 
 
-def test_app_exposes_rsvp2_controller_and_view_index() -> None:
+def test_app_exposes_rsvp_controller_and_view_index() -> None:
     assert isinstance(app.RSVP_CONTROLLER, RsvpController)
     assert isinstance(app.ACTIVE_RSVP_VIEWS, dict)
     assert app.RSVP_CONTROLLER._store is app.RSVP_MESSAGE_STORE
@@ -55,8 +55,8 @@ async def test_event_view_puts_select_event_on_room_row(tmp_path: Path) -> None:
     assert len(view.children) == 4
     room_row = next(child for child in view.children if isinstance(child, RoomActions))
     custom_ids = {cast(Any, child).custom_id for child in room_row.children}
-    assert "butler:rsvp2:select-event" in custom_ids
-    assert "butler:rsvp2:open-room" in custom_ids
+    assert "butler:rsvp:select-event" in custom_ids
+    assert "butler:rsvp:open-room" in custom_ids
 
 
 def test_build_event_select_options_caps_and_labels() -> None:
@@ -147,7 +147,7 @@ async def test_runtime_bind_and_register(tmp_path: Path) -> None:
     bot = MagicMock()
     bot.add_view = MagicMock()
 
-    warning = rsvp2_runtime.bind_and_register_posted_view(
+    warning = rsvp_runtime.bind_and_register_posted_view(
         view=view,
         message=cast(Any, _Msg()),
         channel_id=10,
@@ -191,7 +191,7 @@ async def test_hydrate_persistent_views_registers_from_store_without_fetch(
     bot.add_view = MagicMock()
     settings = MagicMock()
 
-    done = await rsvp2_runtime.hydrate_persistent_views(
+    done = await rsvp_runtime.hydrate_persistent_views(
         already_hydrated=False,
         active_views=active,
         bot=bot,
@@ -205,7 +205,7 @@ async def test_hydrate_persistent_views_registers_from_store_without_fetch(
     assert active[42].responses[9].status == "Maybe"
     bot.add_view.assert_called_once()
     # Second call is a no-op when already hydrated.
-    again = await rsvp2_runtime.hydrate_persistent_views(
+    again = await rsvp_runtime.hydrate_persistent_views(
         already_hydrated=True,
         active_views=active,
         bot=bot,
@@ -247,8 +247,8 @@ async def test_resolve_active_view_rehydrates_and_cleans_missing(
     async def _fetch_ok(**_kwargs: object) -> object:
         return _Msg()
 
-    monkeypatch.setattr(rsvp2_runtime, "fetch_message_from_channel", _fetch_ok)
-    view = await rsvp2_runtime.resolve_active_view(
+    monkeypatch.setattr(rsvp_runtime, "fetch_message_from_channel", _fetch_ok)
+    view = await rsvp_runtime.resolve_active_view(
         message_id=77,
         channel_id=3,
         active_views=active,
@@ -266,8 +266,8 @@ async def test_resolve_active_view_rehydrates_and_cleans_missing(
     async def _fetch_missing(**_kwargs: object) -> None:
         return None
 
-    monkeypatch.setattr(rsvp2_runtime, "fetch_message_from_channel", _fetch_missing)
-    missing = await rsvp2_runtime.resolve_active_view(
+    monkeypatch.setattr(rsvp_runtime, "fetch_message_from_channel", _fetch_missing)
+    missing = await rsvp_runtime.resolve_active_view(
         message_id=88,
         channel_id=3,
         active_views=active,

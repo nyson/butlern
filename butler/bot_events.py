@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import discord
 from discord.ext import commands
 
-import butler.rsvp2.runtime as rsvp2_runtime
+import butler.rsvp.runtime as rsvp_runtime
 from butler.caches.events import (
     handle_gateway_scheduled_event_delete,
     handle_gateway_scheduled_event_upsert,
@@ -17,8 +17,8 @@ from butler.config import DiscordConfig
 from butler.domains.rsvp.store import RsvpMessageStore
 from butler.jobs import IntervalJob, create_interval_job
 from butler.permissions import guild_sync_access_message
-from butler.rsvp2.controller import RsvpController
-from butler.rsvp2.view.event_message_view import EventMessageView
+from butler.rsvp.controller import RsvpController
+from butler.rsvp.view.event_message_view import EventMessageView
 from butler.settings_store import GuildSettingsStore
 
 logger = logging.getLogger(__name__)
@@ -120,7 +120,7 @@ async def _handle_on_ready(
     if runtime_bot.user is not None:
         logger.info("Logged in as %s (ID: %s)", runtime_bot.user, runtime_bot.user.id)
 
-    state.rsvp_views_hydrated = await rsvp2_runtime.hydrate_persistent_views(
+    state.rsvp_views_hydrated = await rsvp_runtime.hydrate_persistent_views(
         already_hydrated=state.rsvp_views_hydrated,
         active_views=deps.get_active_views_fn(),
         bot=runtime_bot,

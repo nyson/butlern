@@ -1,10 +1,9 @@
-"""Unit tests for rsvp2 controller + pure render snapshot + thin views."""
+"""Unit tests for rsvp controller + pure render snapshot + thin views."""
 
 from __future__ import annotations
 
-from typing import Any, cast
-
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -12,10 +11,10 @@ from butler.design import AVAILABLE_EMOJI, RSVP_FOOTER_TEXT
 from butler.domains.result import Ok
 from butler.domains.rsvp.store import RsvpMessageStore
 from butler.domains.rsvp.types import ViewState
-from butler.rsvp2.controller import RsvpController
-from butler.rsvp2.modals.select_event import SelectEventModal
-from butler.rsvp2.view.body import format_rsvp_body
-from butler.rsvp2.view.event_message_view import (
+from butler.rsvp.controller import RsvpController
+from butler.rsvp.modals.select_event import SelectEventModal
+from butler.rsvp.view.body import format_rsvp_body
+from butler.rsvp.view.event_message_view import (
     EventMessageView,
     RoomActions,
     RsvpMetaActions,
@@ -40,7 +39,7 @@ def _view_state(**overrides: object) -> ViewState:
 
 
 def _controller(tmp_path: Path) -> RsvpController:
-    return RsvpController(store=RsvpMessageStore.load(tmp_path / "rsvp2.db"))
+    return RsvpController(store=RsvpMessageStore.load(tmp_path / "rsvp.db"))
 
 
 @pytest.fixture
@@ -343,7 +342,7 @@ async def test_view_layout_is_body_plus_three_action_rows(
     view = EventMessageView(view_state=linked, controller=controller)
     # Event card lives on a companion message, not inside the LayoutView.
     assert len(view.children) == 4
-    from butler.rsvp2.view.body import RsvpBodyDisplay
+    from butler.rsvp.view.body import RsvpBodyDisplay
 
     assert isinstance(view.children[0], RsvpBodyDisplay)
     assert isinstance(view.children[1], RsvpStatusActions)
@@ -389,7 +388,7 @@ async def test_view_apply_snapshot_builds_action_rows(
     assert isinstance(view.children[2], RsvpMetaActions)
     assert isinstance(view.children[3], RoomActions)
     room_ids = {cast(Any, child).custom_id for child in _room_actions(view).children}
-    assert "butler:rsvp2:select-event" in room_ids
+    assert "butler:rsvp:select-event" in room_ids
 
 
 async def test_view_apply_snapshot_is_idempotent(
@@ -464,7 +463,7 @@ async def test_open_event_select_sends_modal_from_warm_cache(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from butler.caches.events import AUTOCOMPLETE_EVENT_CACHE
-    from butler.rsvp2.view import event_message_view as emv
+    from butler.rsvp.view import event_message_view as emv
     from tests.fakes import FakeGuild, FakeInteraction, FakeMember
 
     monkeypatch.setattr(emv, "can_manage_room_action", lambda *_a, **_k: True)
@@ -495,14 +494,14 @@ async def test_controller_then_event_message_view_import_has_no_cycle() -> None:
 
     # Ensure a clean import order: controller must load without any view package.
     for name in list(sys.modules):
-        if name == "butler.rsvp2.controller" or name.startswith("butler.rsvp2.view"):
+        if name == "butler.rsvp.controller" or name.startswith("butler.rsvp.view"):
             del sys.modules[name]
 
-    controller_mod = importlib.import_module("butler.rsvp2.controller")
+    controller_mod = importlib.import_module("butler.rsvp.controller")
     assert hasattr(controller_mod, "RsvpController")
-    assert not any(name.startswith("butler.rsvp2.view") for name in sys.modules)
+    assert not any(name.startswith("butler.rsvp.view") for name in sys.modules)
 
-    view_mod = importlib.import_module("butler.rsvp2.view.event_message_view")
+    view_mod = importlib.import_module("butler.rsvp.view.event_message_view")
     assert hasattr(view_mod, "EventMessageView")
     assert controller_mod.RsvpRenderSnapshot is view_mod.RsvpRenderSnapshot
 
@@ -523,8 +522,8 @@ def _module_imports_rsvp_store(path: Path) -> bool:
 
 async def test_presentation_modules_do_not_import_store() -> None:
     roots = [
-        Path("butler/rsvp2/view"),
-        Path("butler/rsvp2/modals"),
+        Path("butler/rsvp/view"),
+        Path("butler/rsvp/modals"),
     ]
     offenders = [
         str(path)

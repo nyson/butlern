@@ -8,8 +8,8 @@ from discord.ext import commands
 
 from butler.discord_helpers import fetch_message_from_channel
 from butler.domains.rsvp.store import RsvpMessageStore, StoredRsvpMessage
-from butler.rsvp2.controller import RsvpController
-from butler.rsvp2.view.event_message_view import EventMessageView
+from butler.rsvp.controller import RsvpController
+from butler.rsvp.view.event_message_view import EventMessageView
 from butler.settings_store import GuildSettingsStore
 
 logger = logging.getLogger(__name__)

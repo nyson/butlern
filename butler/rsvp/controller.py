@@ -15,7 +15,7 @@ from butler.domains.rsvp.domain import (
 )
 from butler.domains.rsvp.store import RsvpMessageStore
 from butler.domains.rsvp.types import RsvpStatus, ViewState
-from butler.rsvp2.snapshot import RsvpRenderSnapshot
+from butler.rsvp.snapshot import RsvpRenderSnapshot
 
 SnapshotResult: TypeAlias = ServiceResult[RsvpRenderSnapshot]
 ViewMutationResult: TypeAlias = ServiceResult[tuple[ViewState, RsvpRenderSnapshot]]

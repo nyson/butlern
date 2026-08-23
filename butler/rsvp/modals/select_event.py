@@ -30,7 +30,7 @@ class SelectEventModal(ui.Modal, title=SELECT_EVENT_MODAL_TITLE):
             min_values=1,
             max_values=1,
             options=options,
-            custom_id="butler:rsvp2:select-event-modal-menu",
+            custom_id="butler:rsvp:select-event-modal-menu",
         )
         self.add_item(
             ui.Label(

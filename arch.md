@@ -8,15 +8,15 @@ Product behavior, copy constraints, and validation commands live in [`agents.md`
 
 | Area | Today (coexistence) | Target |
 | --- | --- | --- |
-| RSVP UI | `butler/rsvp/*` (`AvailabilityView`, plain content) | `butler/rsvp2/*` (Components V2 `LayoutView`) |
+| RSVP UI | `butler/rsvp/*` (`AvailabilityView`, plain content) | `butler/rsvp/*` (Components V2 `LayoutView`) |
 | Domain / types | Duplicated under `butler/rsvp/` and `butler/domains/rsvp/` | Single package `butler/domains/rsvp/` |
 | Persistence | `butler/rsvp/rsvp_store.py` (and parallel domain store) | `butler/domains/rsvp/store.py` only |
 | Wiring | Globals in `app.py` (`ACTIVE_RSVP_VIEWS`, module-level stores) | `BotWrapper` injector + thin `app.py` |
-| Commands | `/event`, settings commands | Same product surface; `/event2` is the rsvp2 path |
+| Commands | `/event`, settings commands | Same product surface; `/event2` is the rsvp path |
 | Caches | `butler/caches/events/` package | Boot + gateway + daily warm; interaction reads stay cache-only |
 | Jobs | Interval loops inline in `bot_events` | `butler/jobs` (`create_interval_job`) reusable across loops |
 
-Until rsvp2 is feature-complete, both stacks may run. New work lands on the target side.
+Until rsvp is feature-complete, both stacks may run. New work lands on the target side.
 
 ## Layers
 
@@ -119,7 +119,7 @@ Long-running interval work lives under **`butler/jobs/`**, not as one-off loops 
 
 Feature packages that own Discord surface area: slash commands, views, modals, reaction handlers, and **controllers** (application services).
 
-Example target module: `butler/rsvp2/` — controller, LayoutView, modals, command handlers. Modules call domain + stores + caches through injected dependencies. They own ephemeral replies and **Discord-facing** permission checks (extract flags/ids from the interaction, call pure domain policy, send denial messages).
+Example target module: `butler/rsvp/` — controller, LayoutView, modals, command handlers. Modules call domain + stores + caches through injected dependencies. They own ephemeral replies and **Discord-facing** permission checks (extract flags/ids from the interaction, call pure domain policy, send denial messages).
 
 Shared presentation constants stay in `butler/design.py`. Thin Discord I/O helpers (fetch message, resolve channel) stay outside domains. Do **not** leave pure policy (permissions, RSVP rules, room transitions) in top-level grab-bag modules long term—move them into `butler/domains/...`.
 
@@ -210,7 +210,7 @@ Every slash command, component click, and modal submit is a separate interaction
 - After type **6**, there is no thinking message—continue by editing the source message (`interaction.message.edit` / equivalent).
 - A second `response.*` call raises `InteractionResponded`.
 
-### Butler defaults (rsvp2)
+### Butler defaults (rsvp)
 
 | Action | First response | Then |
 | --- | --- | --- |
@@ -266,7 +266,7 @@ Hydration on ready:
 
 1. Warm event cache (`force=True`) **before** publishing slash commands.
 2. Start interval jobs (e.g. daily event-cache resync; first tick skipped when boot already hydrated).
-3. `store.list_messages` → for each row, confirm the Discord message still exists (legacy and/or rsvp2 stacks as wired).
+3. `store.list_messages` → for each row, confirm the Discord message still exists (legacy and/or rsvp stacks as wired).
 4. Recreate view, `bot.add_view(..., message_id=...)`, insert into the ephemeral index.
 5. Delete store rows for missing messages (orphans).
 
@@ -371,11 +371,11 @@ Follow PEP 8 for new/moved code:
 - Constants: `UPPER_SNAKE`
 - Prefer stdlib `dataclasses` for domain/UI snapshots unless there is a concrete reason not to
 
-`rsvp2` is an acceptable migration package name until legacy `rsvp` is removed.
+`rsvp` is an acceptable migration package name until legacy `rsvp` is removed.
 
 ## Reference module: RSVP
 
-Target flow using `rsvp2` + `domains/rsvp`:
+Target flow using `rsvp` + `domains/rsvp`:
 
 1. Slash command validates input and permissions (pure rules from domain modules; Discord adapters at the command edge).
 2. Create or link a Discord scheduled event as needed (picker/autocomplete reads go through `caches/events`, already warmed).
@@ -422,7 +422,7 @@ butler/
       resolve.py
       listing.py
       …
-  rsvp2/                      # module (name may collapse to rsvp later)
+  rsvp/                      # module (name may collapse to rsvp later)
     controller.py
     event_command.py
     runtime.py                # hydrate / reaction reconcile
@@ -439,10 +439,10 @@ butler/
 ## Migration (architecture-facing)
 
 - **Old**: `butler/rsvp/*`, legacy store, `AvailabilityView`, `/event`
-- **New**: `butler/domains/rsvp/*`, `butler/rsvp2/*`, `/event2` → full command parity with legacy before delete
+- **New**: `butler/domains/rsvp/*`, `butler/rsvp/*`, `/event2` → full command parity with legacy before delete
 - Event cache package + `butler/jobs` interval helper are **in place**; keep public `butler.caches.events` imports stable
-- Collapse duplicate types/domain/store to `domains/rsvp` as soon as rsvp2 is the only writer/reader
-- Wire rsvp2 **hydration** and **reaction reconcile** into `bot_events` (parity gaps vs legacy) before removing `rsvp/`
+- Collapse duplicate types/domain/store to `domains/rsvp` as soon as rsvp is the only writer/reader
+- Wire rsvp **hydration** and **reaction reconcile** into `bot_events` (parity gaps vs legacy) before removing `rsvp/`
 - Finish `BotWrapper` as the owner of stores, caches, jobs, and module setup; keep `app.py` as wiring + command registration only
 - Do not use this rewrite as an excuse to churn `design.py` copy unless structure requires it
 - Delete legacy `rsvp/` only after behavior parity (including hydration, reactions, room flow, settings integration, companion event card)

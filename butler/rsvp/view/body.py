@@ -13,7 +13,7 @@ from butler.design import (
 )
 from butler.domains.rsvp.domain import RsvpResponse, mentions_for_status, status_count
 from butler.domains.rsvp.types import RoomState
-from butler.rsvp2.snapshot import RsvpRenderSnapshot
+from butler.rsvp.snapshot import RsvpRenderSnapshot
 
 __all__ = [
     "RsvpBodyDisplay",

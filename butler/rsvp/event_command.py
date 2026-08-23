@@ -51,16 +51,16 @@ from butler.discord_events import (
 from butler.domains.rsvp.domain import RoomSnapshot
 from butler.domains.rsvp.types import ViewState
 from butler.event_logic import EventInput, resolve_event_input
-from butler.rsvp2.controller import RsvpController
-from butler.rsvp2.runtime import bind_and_register_posted_view
-from butler.rsvp2.view.event_message_view import EventMessageView
+from butler.rsvp.controller import RsvpController
+from butler.rsvp.runtime import bind_and_register_posted_view
+from butler.rsvp.view.event_message_view import EventMessageView
 from butler.settings_store import GuildSettingsStore
 
 logger = logging.getLogger(__name__)
 
 
 
-async def post_rsvp2_message(
+async def post_rsvp_message(
     *,
     interaction: discord.Interaction,
     event_channel: discord.TextChannel,
@@ -380,7 +380,7 @@ async def handle_event_command(
     companion_event_url = (
         event_url if event_object is not None and "/events/" in event_url else None
     )
-    rsvp_message = await post_rsvp2_message(
+    rsvp_message = await post_rsvp_message(
         interaction=interaction,
         event_channel=event_channel,
         view=view,

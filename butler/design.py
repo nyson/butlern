@@ -106,7 +106,7 @@ CREATE_NEW_EVENT_CHOICE_LABEL: Final[str] = "Låt Butlern skapa ett evenemang!"
 CREATE_NEW_EVENT_CHOICE_VALUE: Final[str] = "__butler_create_new_event__"
 EVENT_AUTOCOMPLETE_ERROR_TEMPLATE: Final[str] = "ett fel har hänt: {error}"
 
-# Event linking (rsvp2 button-driven selection; not a slash option)
+# Event linking (rsvp button-driven selection; not a slash option)
 SELECT_EVENT_BUTTON_LABEL: Final[str] = "Välj Discord-event"
 SELECT_EVENT_BUTTON_EMOJI: Final[str] = "📅"
 SELECT_EVENT_MODAL_TITLE: Final[str] = "Välj Discord-event"

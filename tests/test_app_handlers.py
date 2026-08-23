@@ -18,8 +18,8 @@ import pytest
 
 import butler.app as app
 import butler.bot_events as bot_events
-import butler.rsvp2.event_command as event_command
-import butler.rsvp2.runtime as rsvp_runtime
+import butler.rsvp.event_command as event_command
+import butler.rsvp.runtime as rsvp_runtime
 from butler.caches.events import reset_connected_event_cache
 from butler.domains.rsvp.store import StoredRsvpMessage
 from butler.domains.rsvp.types import ViewState

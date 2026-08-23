@@ -37,13 +37,13 @@ from butler.domains.rsvp.domain import RsvpResponse, visible_room_buttons
 from butler.domains.rsvp.types import RsvpStatus, ViewState
 from butler.event_logic import normalize_room_url
 from butler.permissions import can_manage_room_action, room_permission_denied_message
-from butler.rsvp2.controller import RsvpController
-from butler.rsvp2.modals.arrive_later import ArriveLaterModal, parse_arrival_time
-from butler.rsvp2.modals.room_link import RoomLinkModal
-from butler.rsvp2.modals.select_event import SelectEventModal
-from butler.rsvp2.snapshot import RsvpRenderSnapshot
-from butler.rsvp2.view.body import RsvpBodyDisplay, is_discord_scheduled_event_url
-from butler.rsvp2.view.event_select import build_event_select_options
+from butler.rsvp.controller import RsvpController
+from butler.rsvp.modals.arrive_later import ArriveLaterModal, parse_arrival_time
+from butler.rsvp.modals.room_link import RoomLinkModal
+from butler.rsvp.modals.select_event import SelectEventModal
+from butler.rsvp.snapshot import RsvpRenderSnapshot
+from butler.rsvp.view.body import RsvpBodyDisplay, is_discord_scheduled_event_url
+from butler.rsvp.view.event_select import build_event_select_options
 from butler.settings_store import GuildSettingsStore
 
 logger = logging.getLogger(__name__)
@@ -84,7 +84,7 @@ class RsvpStatusActions(ui.ActionRow["EventMessageView"]):
         label=AVAILABLE_BUTTON_LABEL,
         emoji=AVAILABLE_EMOJI,
         style=discord.ButtonStyle.success,
-        custom_id="butler:rsvp2:available",
+        custom_id="butler:rsvp:available",
     )
     async def available(
         self,
@@ -97,7 +97,7 @@ class RsvpStatusActions(ui.ActionRow["EventMessageView"]):
         label=MAYBE_BUTTON_LABEL,
         emoji=MAYBE_EMOJI,
         style=discord.ButtonStyle.secondary,
-        custom_id="butler:rsvp2:maybe",
+        custom_id="butler:rsvp:maybe",
     )
     async def maybe(
         self,
@@ -110,7 +110,7 @@ class RsvpStatusActions(ui.ActionRow["EventMessageView"]):
         label=CANT_BUTTON_LABEL,
         emoji=CANT_EMOJI,
         style=discord.ButtonStyle.secondary,
-        custom_id="butler:rsvp2:cant",
+        custom_id="butler:rsvp:cant",
     )
     async def cant(
         self,
@@ -129,7 +129,7 @@ class RsvpMetaActions(ui.ActionRow["EventMessageView"]):
         label=ARRIVE_LATER_BUTTON_LABEL,
         emoji=ARRIVE_LATER_EMOJI,
         style=discord.ButtonStyle.secondary,
-        custom_id="butler:rsvp2:later",
+        custom_id="butler:rsvp:later",
     )
     async def later(
         self,
@@ -142,7 +142,7 @@ class RsvpMetaActions(ui.ActionRow["EventMessageView"]):
         label=STORYTELLER_BUTTON_LABEL,
         emoji=STORYTELLER_EMOJI,
         style=discord.ButtonStyle.secondary,
-        custom_id="butler:rsvp2:storyteller",
+        custom_id="butler:rsvp:storyteller",
     )
     async def storyteller(
         self,
@@ -168,7 +168,7 @@ class RoomActions(ui.ActionRow["EventMessageView"]):
         label=SELECT_EVENT_BUTTON_LABEL,
         emoji=SELECT_EVENT_BUTTON_EMOJI,
         style=discord.ButtonStyle.secondary,
-        custom_id="butler:rsvp2:select-event",
+        custom_id="butler:rsvp:select-event",
     )
     async def select_event(
         self,
@@ -181,7 +181,7 @@ class RoomActions(ui.ActionRow["EventMessageView"]):
         label=ROOM_LINK_PROMPT_BUTTON_LABEL,
         emoji=ROOM_LINK_PROMPT_BUTTON_EMOJI,
         style=discord.ButtonStyle.secondary,
-        custom_id="butler:rsvp2:open-room",
+        custom_id="butler:rsvp:open-room",
     )
     async def open_room(
         self,
@@ -194,7 +194,7 @@ class RoomActions(ui.ActionRow["EventMessageView"]):
         label=ROOM_CLOSE_BUTTON_LABEL,
         emoji=ROOM_CLOSE_BUTTON_EMOJI,
         style=discord.ButtonStyle.danger,
-        custom_id="butler:rsvp2:close-room",
+        custom_id="butler:rsvp:close-room",
     )
     async def close_room(
         self,

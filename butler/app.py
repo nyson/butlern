@@ -5,7 +5,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import butler.bot_events as bot_events
-import butler.rsvp2.event_command as rsvp_event_command
+import butler.rsvp.event_command as rsvp_event_command
 import butler.settings_command as settings_command
 from butler.config import load_config
 from butler.constants import PERSISTANCE_PATH
@@ -17,8 +17,8 @@ from butler.discord_helpers import (
 )
 from butler.domains.rsvp.store import RsvpMessageStore
 from butler.permissions import find_onboarding_channel
-from butler.rsvp2.controller import RsvpController
-from butler.rsvp2.view.event_message_view import EventMessageView
+from butler.rsvp.controller import RsvpController
+from butler.rsvp.view.event_message_view import EventMessageView
 from butler.settings_store import GuildSettingsStore
 
 CONFIG = load_config()

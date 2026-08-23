@@ -14,7 +14,7 @@ async def stopwatch(
     *,
     guild_id: int | None = None,
 ) -> AsyncIterator[None]:
-    """Log wall time for a Discord/API section."""
+    """Log wall time for an async section."""
     started = time.perf_counter()
     try:
         yield

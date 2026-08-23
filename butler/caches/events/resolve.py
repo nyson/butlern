@@ -10,8 +10,7 @@ from butler.caches.events.listing import (
     fetch_scheduled_event_by_id,
     reusable_scheduled_events_for_guild,
 )
-from butler.caches.events.reusability import is_reusable_scheduled_event
-from butler.caches.events.store import (
+from butler.caches.events.option_cache import (
     cache_connected_event_id,
     cache_reusable_events_for_guild,
     cached_connected_event_id,
@@ -19,6 +18,7 @@ from butler.caches.events.store import (
     drop_cached_event_option,
     upsert_cached_event_option,
 )
+from butler.caches.events.reusability import is_reusable_scheduled_event
 from butler.design import CREATE_NEW_EVENT_CHOICE_VALUE
 from butler.discord_events import coerce_utc
 

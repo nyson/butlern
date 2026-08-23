@@ -5,14 +5,12 @@ from collections.abc import Mapping
 
 import discord
 
-from butler.caches.events.constants import (
-    MAX_EVENT_CHOICE_NAME_LENGTH,
-    SWEDISH_TIMEZONE,
-)
+from butler.caches.events.constants import MAX_EVENT_CHOICE_NAME_LENGTH
 from butler.caches.events.recurrence import (
     occurrence_start_utc_for_local_date,
     recurrence_rule_payload_for_event,
 )
+from butler.constants import SWEDISH_TIMEZONE
 from butler.discord_events import event_start_utc
 
 

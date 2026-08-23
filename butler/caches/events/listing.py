@@ -11,7 +11,7 @@ from butler.caches.events.recurrence_adapter import (
     recurrence_rules_from_raw_scheduled_events,
 )
 from butler.caches.events.reusability import event_sort_key, is_reusable_scheduled_event
-from butler.caches.events.timing import stopwatch
+from butler.timing import stopwatch
 
 logger = logging.getLogger(__name__)
 

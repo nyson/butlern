@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 
 import discord
-from discord import Guild, app_commands
+from discord import app_commands
 
 from butler.caches.events.constants import MAX_EVENT_AUTOCOMPLETE_CHOICES
-from butler.caches.events.store import (
+from butler.caches.events.option_cache import (
     AUTOCOMPLETE_EVENT_CACHE,
     event_option_cache_is_fresh,
 )
@@ -19,7 +18,9 @@ from butler.design import (
 
 logger = logging.getLogger(__name__)
 
-_BACKGROUND_WARMUP_TASKS: set[asyncio.Task[None]] = set()
+
+class EventOptionCacheColdError(RuntimeError):
+    """Raised when autocomplete runs before boot/gateway/daily warm completed."""
 
 
 def create_new_choice() -> app_commands.Choice[str]:
@@ -29,38 +30,26 @@ def create_new_choice() -> app_commands.Choice[str]:
     )
 
 
-def schedule_background_warmup(guild: Guild) -> None:
-    """Kick off a non-blocking warm if cache is cold (autocomplete must stay <3s)."""
-    from butler.caches.events.warmup import warmup_connected_event_cache
-
-    if event_option_cache_is_fresh(guild_id=guild.id):
-        return
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return
-    task = loop.create_task(
-        warmup_connected_event_cache(guilds=[guild], force=False),
-        name=f"butler-event-cache-warmup-{guild.id}",
-    )
-    _BACKGROUND_WARMUP_TASKS.add(task)
-    task.add_done_callback(_BACKGROUND_WARMUP_TASKS.discard)
-
-
 # NOSONAR - discord.py autocomplete callback is async by API contract.
 async def autocomplete_existing_event(
     interaction: discord.Interaction,
     current: str,
 ) -> list[app_commands.Choice[str]]:
-    """Return cache-backed choices only. Never await Discord list here (3s limit)."""
+    """Return cache-backed choices only.
+
+    Commands that use this autocomplete must not be published while the event
+    option cache is cold. A cold cache is a programming/ops error — raise.
+    """
     try:
         guild = interaction.guild
         if guild is None:
             return [create_new_choice()]
 
-        # If cold, warm in background for later keystrokes — do not block this response.
         if not event_option_cache_is_fresh(guild_id=guild.id):
-            schedule_background_warmup(guild)
+            raise EventOptionCacheColdError(
+                f"Event option cache is cold for guild {guild.id}; "
+                "slash commands should not be registered until warm."
+            )
 
         candidates = list(AUTOCOMPLETE_EVENT_CACHE.get(guild.id, []))
         query = current.strip().casefold()
@@ -75,6 +64,8 @@ async def autocomplete_existing_event(
             for name, value in candidates[: max(0, MAX_EVENT_AUTOCOMPLETE_CHOICES - 1)]
         ]
         return [create_new_choice(), *event_choices]
+    except EventOptionCacheColdError:
+        raise
     except Exception as e:
         return [
             app_commands.Choice(

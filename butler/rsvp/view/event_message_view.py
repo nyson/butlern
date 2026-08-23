@@ -31,7 +31,6 @@ from butler.design import (
     STORYTELLER_EMOJI,
 )
 from butler.discord_events import build_event_url, event_start_unix
-from butler.discord_helpers import announce_room_opening
 from butler.domains.result import Err, Ok, ServiceError
 from butler.domains.rsvp.domain import RsvpResponse, visible_room_buttons
 from butler.domains.rsvp.types import RsvpStatus, ViewState
@@ -41,6 +40,7 @@ from butler.rsvp.controller import RsvpController
 from butler.rsvp.modals.arrive_later import ArriveLaterModal, parse_arrival_time
 from butler.rsvp.modals.room_link import RoomLinkModal
 from butler.rsvp.modals.select_event import SelectEventModal
+from butler.rsvp.room_announce import announce_room_opening
 from butler.rsvp.snapshot import RsvpRenderSnapshot
 from butler.rsvp.view.body import RsvpBodyDisplay, is_discord_scheduled_event_url
 from butler.rsvp.view.event_select import build_event_select_options

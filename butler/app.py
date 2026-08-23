@@ -1,35 +1,32 @@
 from __future__ import annotations
-import datetime as dt
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 import butler.bot_events as bot_events
-import butler.rsvp.event_command as rsvp_event_command
-import butler.rsvp.settings_command as rsvp_settings_command
+import butler.rsvp2.event_command as rsvp_event_command
+import butler.settings_command as settings_command
 from butler.config import load_config
 from butler.constants import PERSISTANCE_PATH
-from butler.design import ONBOARDING_MESSAGE
+from butler.design import EVENT_OPTION_DESCRIPTION, ONBOARDING_MESSAGE
+from butler.discord_events import BOTC_EDITION_CHOICES
 from butler.discord_helpers import (
     get_bot_member,
     resolve_text_channel,
 )
+from butler.domains.rsvp.store import RsvpMessageStore
 from butler.permissions import find_onboarding_channel
-from butler.rsvp.rsvp_store import RsvpMessageStore
-from butler.rsvp.rsvp_view import AvailabilityView
-from butler.rsvp.types import ViewState
-from butler.rsvp2.EventMessageView import EventMessageView
 from butler.rsvp2.controller import RsvpController
-import butler.domains.rsvp.store as rsvp_store
+from butler.rsvp2.view.event_message_view import EventMessageView
 from butler.settings_store import GuildSettingsStore
-
 
 CONFIG = load_config()
 _force_guild_sync = False
 SETTINGS_STORE = GuildSettingsStore.load(PERSISTANCE_PATH)
 RSVP_MESSAGE_STORE = RsvpMessageStore.load(PERSISTANCE_PATH)
-ACTIVE_RSVP_VIEWS: dict[int, AvailabilityView] = {}
+RSVP_CONTROLLER = RsvpController(store=RSVP_MESSAGE_STORE)
+ACTIVE_RSVP_VIEWS: dict[int, EventMessageView] = {}
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix=commands.when_mentioned, intents=intents)
@@ -43,42 +40,59 @@ _REGISTERED_BOT_EVENTS = bot_events.register_bot_events(
     get_active_views_fn=lambda: ACTIVE_RSVP_VIEWS,
     get_settings_store_fn=lambda: SETTINGS_STORE,
     get_view_store_fn=lambda: RSVP_MESSAGE_STORE,
+    get_controller_fn=lambda: RSVP_CONTROLLER,
     get_bot_member_fn=get_bot_member,
     find_onboarding_channel_fn=find_onboarding_channel,
     onboarding_message=ONBOARDING_MESSAGE,
 )
 on_ready = _REGISTERED_BOT_EVENTS.on_ready
 on_guild_join = _REGISTERED_BOT_EVENTS.on_guild_join
-on_raw_reaction_add = _REGISTERED_BOT_EVENTS.on_raw_reaction_add
-on_raw_reaction_remove = _REGISTERED_BOT_EVENTS.on_raw_reaction_remove
+on_scheduled_event_create = _REGISTERED_BOT_EVENTS.on_scheduled_event_create
+on_scheduled_event_delete = _REGISTERED_BOT_EVENTS.on_scheduled_event_delete
+on_scheduled_event_update = _REGISTERED_BOT_EVENTS.on_scheduled_event_update
 setup_hook = _REGISTERED_BOT_EVENTS.setup_hook
 
 
 @bot.tree.command(
-        name="event2"
+    name="event",
+    description="Post an RSVP message, optionally linking a Discord event",
 )
 @app_commands.guild_only()
-@app_commands.default_permissions(manage_guild=True)
 @app_commands.describe(
-    title="event title"
+    title="Event title",
+    description="Event description text",
+    event=f"Optional. {EVENT_OPTION_DESCRIPTION}",
+    edition="Optional edition from BOTC resources",
+    room_link="Optional room URL (http/https) to include in the post",
+    start_time="Optional start time in 24h format HH:MM (default: 19:00)",
 )
-async def event2(
+@app_commands.choices(edition=BOTC_EDITION_CHOICES)
+@app_commands.autocomplete(event=rsvp_event_command.autocomplete_existing_event)
+async def event(
     interaction: discord.Interaction,
-    title: str) -> None:
-    st = ViewState(
-        event_name="hej",
-        start_unix=int(dt.datetime.now(dt.UTC).timestamp()),
-        event_url="ett event.com",
-        edition="bmr",
-        edition_emoji="❣",
-        room_state="pending",
-        room_url="ett rum.com",
-        edition_image_url=None,
-        event_description="coola eventet"
+    title: str,
+    description: str,
+    event: str | None = None,
+    edition: app_commands.Choice[str] | None = None,
+    room_link: str | None = None,
+    start_time: str | None = None,
+) -> None:
+    await rsvp_event_command.handle_event_command(
+        interaction=interaction,
+        title=title,
+        description=description,
+        event=event,
+        edition=edition,
+        room_link=room_link,
+        start_time=start_time,
+        bot=bot,
+        settings_store=SETTINGS_STORE,
+        controller=RSVP_CONTROLLER,
+        active_views=ACTIVE_RSVP_VIEWS,
+        get_bot_member_fn=get_bot_member,
+        resolve_text_channel_fn=resolve_text_channel,
     )
-    await interaction.response.send_message(
-        view=EventMessageView(st, RsvpController(store=rsvp_store.RsvpMessageStore.load(PERSISTANCE_PATH))),
-        ephemeral=True)
+
 
 @bot.tree.command(
     name="seteventchannel",
@@ -91,7 +105,7 @@ async def seteventchannel(
     interaction: discord.Interaction,
     event_channel: discord.TextChannel,
 ) -> None:
-    await rsvp_settings_command.handle_seteventchannel_command(
+    await settings_command.handle_seteventchannel_command(
         interaction=interaction,
         event_channel=event_channel,
         bot=bot,
@@ -116,90 +130,12 @@ async def seteventrole(
     interaction: discord.Interaction,
     role: discord.Role | None = None,
 ) -> None:
-    await rsvp_settings_command.handle_seteventrole_command(
+    await settings_command.handle_seteventrole_command(
         interaction=interaction,
         role=role,
         settings_store=SETTINGS_STORE,
     )
 
-
-@bot.tree.command(
-    name="event",
-    description="Create a planned event and post an RSVP message",
-)
-@app_commands.guild_only()
-@app_commands.describe(
-    title="Event title",
-    description="Event description text",
-    edition="Optional edition from BOTC resources",
-    event="Välj befintligt event eller låt Butlern skapa ett nytt",
-    room_link="Optional room URL (http/https) to include in the post",
-    start_time="Optional start time in 24h format HH:MM (default: 19:00)",
-)
-@app_commands.choices(edition=rsvp_event_command.BOTC_EDITION_CHOICES)
-@app_commands.autocomplete(event=rsvp_event_command.autocomplete_existing_event)
-async def event(
-    interaction: discord.Interaction,
-    title: str,
-    description: str,
-    event: str,
-    edition: app_commands.Choice[str] | None = None,
-    room_link: str | None = None,
-    start_time: str | None = None,
-) -> None:
-    
-    await rsvp_event_command.handle_event_command(
-        interaction=interaction,
-        title=title,
-        description=description,
-        event=event,
-        edition=edition,
-        room_link=room_link,
-        start_time=start_time,
-        bot=bot,
-        settings_store=SETTINGS_STORE,
-        view_store=RSVP_MESSAGE_STORE,
-        active_views=ACTIVE_RSVP_VIEWS,
-        get_bot_member_fn=get_bot_member,
-        resolve_text_channel_fn=resolve_text_channel,
-    )
-
-
-@bot.tree.command(
-    name="previeweventdesign",
-    description="Post an RSVP design preview without creating a scheduled event",
-)
-@app_commands.guild_only()
-@app_commands.describe(
-    title="Optional preview title",
-    description="Optional preview description text",
-    edition="Optional edition from BOTC resources",
-    room_link="Optional room URL (http/https) to include in the preview",
-    start_time="Optional preview start time in HH:MM (default: 19:00)",
-)
-@app_commands.choices(edition=rsvp_event_command.BOTC_EDITION_CHOICES)
-async def previeweventdesign(
-    interaction: discord.Interaction,
-    title: str | None = None,
-    description: str | None = None,
-    edition: app_commands.Choice[str] | None = None,
-    room_link: str | None = None,
-    start_time: str | None = None,
-) -> None:
-    await rsvp_event_command.handle_previeweventdesign_command(
-        interaction=interaction,
-        title=title,
-        description=description,
-        edition=edition,
-        room_link=room_link,
-        start_time=start_time,
-        bot=bot,
-        settings_store=SETTINGS_STORE,
-        view_store=RSVP_MESSAGE_STORE,
-        active_views=ACTIVE_RSVP_VIEWS,
-        get_bot_member_fn=get_bot_member,
-        resolve_text_channel_fn=resolve_text_channel,
-    )
 
 
 def main(*, force_guild_sync: bool = False) -> None:
@@ -207,7 +143,7 @@ def main(*, force_guild_sync: bool = False) -> None:
     _force_guild_sync = force_guild_sync
     if not CONFIG.token:
         raise RuntimeError("Missing DISCORD_TOKEN in .env or the environment.")
-    bot.run(CONFIG.token)
+    bot.run(CONFIG.token, root_logger=True)
 
 
 def main_dev() -> None:

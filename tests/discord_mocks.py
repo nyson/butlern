@@ -126,6 +126,15 @@ def make_guild(
 
     resolved_scheduled_events = list(scheduled_events or [])
     guild.fetch_scheduled_events = AsyncMock(return_value=resolved_scheduled_events)
+    guild.scheduled_events = resolved_scheduled_events
+    guild.get_scheduled_event = MagicMock(
+        side_effect=lambda event_id: next(
+            (event for event in resolved_scheduled_events if event.id == event_id),
+            None,
+        )
+    )
+    # No live HTTP client: force the typed-fetch path (not raw double-parse).
+    guild._state = None
 
     async def _fetch_scheduled_event(
         scheduled_event_id: int,

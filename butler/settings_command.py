@@ -5,6 +5,7 @@ from collections.abc import Callable
 import discord
 from discord.ext import commands
 
+from butler.design import MANAGE_SERVER_PERMISSION_LABEL
 from butler.permissions import format_permissions, get_missing_post_permissions
 from butler.settings_store import GuildSettingsStore
 
@@ -103,7 +104,7 @@ async def handle_seteventrole_command(
     if role is None:
         await interaction.response.send_message(
             "Cleared the event manager role. Only users with "
-            "`Hantera server` can now create events and open/close rooms.",
+            f"{MANAGE_SERVER_PERMISSION_LABEL} can now create events and open/close rooms.",
             ephemeral=True,
         )
         return
@@ -111,7 +112,7 @@ async def handle_seteventrole_command(
     await interaction.response.send_message(
         (
             f"Members with {role.mention} can now create events and open/close rooms "
-            "(in addition to `Hantera server`)."
+            f"(in addition to {MANAGE_SERVER_PERMISSION_LABEL})."
         ),
         ephemeral=True,
     )

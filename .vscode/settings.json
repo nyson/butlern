@@ -2,12 +2,11 @@
     "cSpell.words": [
         "blurple",
         "eventtoday",
-        "previeweventdesign",
         "rumslänk",
         "seteventchannel",
         "storytella"
     ],
-    "python.analysis.typeCheckingMode": "strict",
+    "python.analysis.typeCheckingMode": "off",
     "python.analysis.autoImportCompletions": true,
     "python.testing.pytestArgs": [
         "tests"

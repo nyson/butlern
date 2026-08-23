@@ -1,17 +1,15 @@
 
-from typing import Literal, Union
+from typing import Literal
+
+from discord.ext import commands
 
 from butler.base import Store
 from butler.config import DiscordConfig, load_config
 from butler.constants import PERSISTANCE_PATH
-from butler.rsvp.rsvp_store import RsvpMessageStore
+from butler.domains.rsvp.store import RsvpMessageStore
 from butler.settings_store import GuildSettingsStore
 
-from discord.ext import commands
-
-StoreKey = Union[
-    Literal["settings"],
-    Literal["rsvp"]]
+StoreKey = Literal["settings", "rsvp"]
 
 class BotWrapper:
     config: DiscordConfig
@@ -25,4 +23,3 @@ class BotWrapper:
         self.config = load_config()
         self.stores["settings"] = GuildSettingsStore.load(PERSISTANCE_PATH)
         self.stores["rsvp"] = RsvpMessageStore.load(PERSISTANCE_PATH)
-        

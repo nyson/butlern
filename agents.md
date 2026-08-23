@@ -37,7 +37,6 @@
 4. Post editable RSVP message with buttons/reactions.
 5. Track RSVP message in `ACTIVE_RSVP_VIEWS`.
 
-### `/previeweventdesign`
 - Posts only the editable RSVP preview message (no scheduled-event creation).
 
 ## RSVP rendering model

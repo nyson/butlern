@@ -1,6 +1,6 @@
 """Lightweight, dependency-free fakes for the Discord objects the imperative shell touches.
 
-These let the shell (`butler.app`, `butler.rsvp.rsvp_view`) be unit-tested without a live
+These let the shell (`butler.app`, `butler.rsvp_view`) be unit-tested without a live
 gateway connection. They deliberately do **not** subclass `discord.py` types: subclassing the
 real classes drags in heavy state and trips strict typing. Instead each fake exposes only the
 attributes/methods the bot actually reads, and records outgoing calls so tests can assert on them.
@@ -110,6 +110,10 @@ class FakeResponse:
         self.deferred = False
         self.deferred_ephemeral = False
         self.messages: list[SentMessage] = []
+        self.modals: list[object] = []
+
+    def is_done(self) -> bool:
+        return self.deferred or bool(self.messages) or bool(self.modals)
 
     async def defer(self, *, ephemeral: bool = False, thinking: bool = False) -> None:
         self.deferred = True
@@ -125,6 +129,9 @@ class FakeResponse:
         self.messages.append(
             SentMessage(content=content, ephemeral=ephemeral, extras=dict(kwargs))
         )
+
+    async def send_modal(self, modal: object) -> None:
+        self.modals.append(modal)
 
 
 class FakeFollowup:
@@ -145,6 +152,16 @@ class FakeFollowup:
         )
 
 
+class FakeClient:
+    """Minimal stand-in for ``interaction.client`` used by message edit helpers."""
+
+    def get_channel(self, _channel_id: int) -> None:
+        return None
+
+    async def fetch_channel(self, _channel_id: int) -> None:
+        return None
+
+
 class FakeInteraction:
     def __init__(
         self,
@@ -152,10 +169,12 @@ class FakeInteraction:
         guild: FakeGuild | None = None,
         user: FakeMember | None = None,
         channel: FakeTextChannel | None = None,
+        client: FakeClient | None = None,
     ) -> None:
         self.guild = guild
         self.user = user
         self.channel = channel
+        self.client = client if client is not None else FakeClient()
         self.response = FakeResponse()
         self.followup = FakeFollowup()
 

@@ -3,9 +3,9 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from butler.rsvp.rsvp_domain import RsvpResponse
-from butler.rsvp.rsvp_store import RsvpMessageStore
-from butler.rsvp.types import ViewState
+from butler.domains.rsvp.domain import RsvpResponse
+from butler.domains.rsvp.store import RsvpMessageStore
+from butler.domains.rsvp.types import ViewState
 
 
 def _view_state() -> ViewState:

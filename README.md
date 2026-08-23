@@ -94,7 +94,6 @@ No privileged intents are required for the current slash-command/button/reaction
 - Dev mode (strict guild sync):
   - `poetry run butler-dev`
 
-`butler-dev` keeps `/previeweventdesign` available for design iteration in the configured guild.
 
 ## Persistence model
 All persistent state is stored in SQLite (`butler_state.db` by default, configurable via `BUTLER_DB_PATH`):
@@ -118,7 +117,6 @@ On startup, Butler hydrates persistent RSVP views and removes stale rows that re
     - `edition` (optional)
     - `room_link` (optional `http://`/`https://`)
     - `start_time` (optional `HH:MM`, default `19:00`)
-- `/previeweventdesign` (dev mode/guild sync workflows)
   - Posts RSVP preview without creating a scheduled Discord event.
 
 ## RSVP interactions

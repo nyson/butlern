@@ -410,7 +410,7 @@ async def test_room_actions_visibility_pending_vs_open(
     room_row = _room_actions(view)
     labels = [cast(Any, child).label for child in room_row.children]
     assert any(label and "Öppna" in label for label in labels)
-    assert any(label and "Discord-event" in label for label in labels)
+    assert any(label and "Koppla evenemang" in label for label in labels)
 
     result = await controller.open_room(
         message_id=None,
@@ -424,7 +424,7 @@ async def test_room_actions_visibility_pending_vs_open(
     room_row = _room_actions(view)
     labels = [cast(Any, child).label for child in room_row.children]
     assert any(label and "Stäng" in label for label in labels)
-    assert any(label and "Discord-event" in label for label in labels)
+    assert any(label and "Koppla evenemang" in label for label in labels)
 
 
 async def test_view_bind_message_context_persists(

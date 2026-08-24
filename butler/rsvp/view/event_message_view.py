@@ -642,7 +642,13 @@ class EventMessageView(ui.LayoutView):
         *,
         event_url: str,
     ) -> None:
-        """Create or edit the companion bare-URL message for the scheduled-event card."""
+        """Edit the companion slot to the scheduled-event URL (or post if missing).
+
+        New RSVPs always create a companion above the RSVP (placeholder or URL).
+        Late-link should therefore almost always hit the edit path. Posting a new
+        companion is only a fallback for older messages or a deleted card, and may
+        land below the RSVP.
+        """
         if not is_discord_scheduled_event_url(event_url):
             return
         channel = await self._channel_for_edit(interaction)

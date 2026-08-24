@@ -41,6 +41,12 @@ from butler.design import (
 from butler.design import (
     CREATE_NEW_EVENT_CHOICE_VALUE as CREATE_NEW_EVENT_CHOICE_VALUE,
 )
+from butler.design import (
+    EVENT_CARD_PLACEHOLDER_MESSAGE as EVENT_CARD_PLACEHOLDER_MESSAGE,
+)
+from butler.design import (
+    SELECT_EVENT_BUTTON_LABEL as SELECT_EVENT_BUTTON_LABEL,
+)
 from butler.discord_events import (
     build_event_url,
     build_preview_event_url,
@@ -68,13 +74,20 @@ async def post_rsvp_message(
     event_url: str | None = None,
     created_event: bool = True,
 ) -> discord.Message | None:
-    """Post RSVP LayoutView; optionally post bare event URL first for Discord's event card."""
+    """Post companion slot first, then RSVP LayoutView.
+
+    Companion is either the bare scheduled-event URL (native Discord card) or a
+    placeholder. Always posting it above the RSVP keeps late-link order correct:
+    **Koppla evenemang** edits the same message instead of appending below.
+    """
     try:
-        # Companion bare-URL message (native Discord event card). Tracked on the view so
-        # later "Välj Discord-event" can edit it instead of posting duplicates.
-        if event_url is not None and "/events/" in event_url:
-            card_message = await event_channel.send(content=event_url)
-            view.set_event_card_message_id(card_message.id)
+        companion_content = (
+            event_url
+            if event_url is not None and "/events/" in event_url
+            else EVENT_CARD_PLACEHOLDER_MESSAGE
+        )
+        card_message = await event_channel.send(content=companion_content)
+        view.set_event_card_message_id(card_message.id)
         return await event_channel.send(view=view)
     except discord.Forbidden:
         if created_event:
@@ -269,7 +282,7 @@ def _event_success_message(
     return (
         f"Posted RSVP for **{display_name}** in "
         f"{event_channel.mention}: {rsvp_message.jump_url}\n"
-        "Länka eller skapa ett Discord-event via **Välj Discord-event**."
+        f"Länka eller skapa ett Discord-event via **{SELECT_EVENT_BUTTON_LABEL}**."
     )
 
 
@@ -292,7 +305,7 @@ async def handle_event_command(
     """Post an RSVP, optionally linking/creating a Discord scheduled event.
 
     ``event`` is optional cache-backed autocomplete (today/recurring-today +
-    create-new). Omit it to post unlinked; link later via **Välj Discord-event**.
+    create-new). Omit it to post unlinked; link later via **Koppla evenemang**.
     """
     event_context = await resolve_event_command_context(interaction)
     if event_context is None:
@@ -376,7 +389,8 @@ async def handle_event_command(
         controller=controller,
         settings_store=settings_store,
     )
-    # Only real scheduled-event URLs get a companion message (Discord event card).
+    # Real scheduled-event URLs unfurl as Discord's event card; otherwise a
+    # placeholder occupies the companion slot above the RSVP.
     companion_event_url = (
         event_url if event_object is not None and "/events/" in event_url else None
     )

@@ -6,3 +6,5 @@ config.toml
 butler_state.db
 *.db-shm
 *.db-wal
+dist/
+image.png

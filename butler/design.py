@@ -107,9 +107,14 @@ CREATE_NEW_EVENT_CHOICE_VALUE: Final[str] = "__butler_create_new_event__"
 EVENT_AUTOCOMPLETE_ERROR_TEMPLATE: Final[str] = "ett fel har hänt: {error}"
 
 # Event linking (rsvp button-driven selection; not a slash option)
-SELECT_EVENT_BUTTON_LABEL: Final[str] = "Välj Discord-event"
+SELECT_EVENT_BUTTON_LABEL: Final[str] = "Koppla evenemang"
 SELECT_EVENT_BUTTON_EMOJI: Final[str] = "📅"
-SELECT_EVENT_MODAL_TITLE: Final[str] = "Välj Discord-event"
+# Companion message above RSVP when no scheduled-event URL is linked yet.
+# Plain text so late-link can edit this same message into the event URL.
+EVENT_CARD_PLACEHOLDER_MESSAGE: Final[str] = (
+    "Här kommer det upp ett evenemang när du har kopplat ett!"
+)
+SELECT_EVENT_MODAL_TITLE: Final[str] = "Koppla evenemang"
 SELECT_EVENT_MODAL_LABEL: Final[str] = "Event idag"
 SELECT_EVENT_PLACEHOLDER: Final[str] = "Välj ett event från cachen"
 SELECT_EVENT_EMPTY_MESSAGE: Final[str] = (
@@ -121,7 +126,7 @@ SELECT_EVENT_CREATED_TEMPLATE: Final[str] = (
     "Skapade Discord-event **{event_name}** och länkade RSVP."
 )
 SELECT_EVENT_PERMISSION_DENIED_MESSAGE: Final[str] = (
-    "Du behöver storyteller-rollen för att välja Discord-event."
+    "Du behöver storyteller-rollen för att koppla evenemang."
 )
 
 # Discord permission label as shown to Swedish guilds

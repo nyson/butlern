@@ -8,7 +8,10 @@ imports keep working:
 
 from __future__ import annotations
 
-from butler.caches.events.autocomplete import autocomplete_existing_event
+from butler.caches.events.autocomplete import (
+    autocomplete_existing_event,
+    autocomplete_existing_or_create_event,
+)
 from butler.caches.events.gateway import (
     handle_gateway_scheduled_event_delete,
     handle_gateway_scheduled_event_upsert,
@@ -50,6 +53,7 @@ __all__ = [
     "AUTOCOMPLETE_EVENT_CACHE",
     "ExistingEventResolution",
     "autocomplete_existing_event",
+    "autocomplete_existing_or_create_event",
     "build_event_url",
     "build_preview_event_url",
     "cache_connected_event_id",

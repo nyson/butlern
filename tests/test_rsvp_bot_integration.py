@@ -14,6 +14,7 @@ from butler.domains.rsvp.store import RsvpMessageStore
 from butler.domains.rsvp.types import ViewState
 from butler.rsvp import runtime as rsvp_runtime
 from butler.rsvp.controller import RsvpController
+from butler.rsvp.view.event_card_view import EventCardView
 from butler.rsvp.view.event_message_view import EventMessageView, RoomActions
 from butler.rsvp.view.event_select import build_event_select_options
 
@@ -27,16 +28,22 @@ def test_app_exposes_rsvp_controller_and_view_index() -> None:
 def test_event_command_is_registered_on_bot_tree() -> None:
     names = {cmd.name for cmd in app.bot.tree.get_commands()}
     assert "event" in names
-    event_cmd = next(cmd for cmd in app.bot.tree.get_commands() if cmd.name == "event")
-    parameters = cast(Any, event_cmd).parameters
-    options_by_name = {opt.name: opt for opt in parameters}
-    assert {"title", "description", "event"}.issubset(options_by_name)
-    assert options_by_name["event"].required is False
-    assert options_by_name["title"].required is True
-    assert options_by_name["description"].required is True
+    event_group = next(cmd for cmd in app.bot.tree.get_commands() if cmd.name == "event")
+    subcommands = {cmd.name: cmd for cmd in event_group.commands}
+    assert {"create", "link"}.issubset(subcommands)
+
+    create_opts = {opt.name: opt for opt in cast(Any, subcommands["create"]).parameters}
+    assert create_opts["title"].required is True
+    assert create_opts["description"].required is True
+    assert create_opts["event"].required is False
+
+    link_opts = {opt.name: opt for opt in cast(Any, subcommands["link"]).parameters}
+    assert link_opts["event"].required is True
+    assert "title" not in link_opts
+    assert "description" not in link_opts
 
 
-async def test_event_view_puts_select_event_on_room_row(tmp_path: Path) -> None:
+async def test_event_view_puts_select_event_on_event_card(tmp_path: Path) -> None:
     store = RsvpMessageStore.load(tmp_path / "v.db")
     controller = RsvpController(store=store)
     state = ViewState(
@@ -51,12 +58,16 @@ async def test_event_view_puts_select_event_on_room_row(tmp_path: Path) -> None:
         event_description="desc",
     )
     view = EventMessageView(view_state=state, controller=controller)
-    # Placeholder event URL: body + 3 action rows (no scheduled-event container).
+    # RSVP LayoutView: body + 3 action rows; link button lives on companion card.
     assert len(view.children) == 4
     room_row = next(child for child in view.children if isinstance(child, RoomActions))
     custom_ids = {cast(Any, child).custom_id for child in room_row.children}
-    assert "butler:rsvp:select-event" in custom_ids
+    assert "butler:rsvp:select-event" not in custom_ids
     assert "butler:rsvp:open-room" in custom_ids
+    card = view.build_event_card_view()
+    assert isinstance(card, EventCardView)
+    card_ids = {cast(Any, child).custom_id for child in card.children}
+    assert "butler:rsvp:select-event" in card_ids
 
 
 def test_build_event_select_options_caps_and_labels() -> None:
@@ -124,6 +135,41 @@ async def test_controller_roundtrip_isolated_store(tmp_path: Path) -> None:
     assert result.value.responses[9].status == "Available"
 
 
+async def test_apply_snapshot_reregisters_view_after_rebuild(tmp_path: Path) -> None:
+    """clear_items orphans ViewStore button refs; rebuild must bot.add_view again."""
+    store = RsvpMessageStore.load(tmp_path / "rereg.db")
+    controller = RsvpController(store=store)
+    state = ViewState(
+        event_name="rereg",
+        start_unix=1,
+        event_url="https://example.com",
+        edition=None,
+        edition_emoji=None,
+        room_state="pending",
+        room_url=None,
+        edition_image_url=None,
+        event_description="d",
+        event_card_message_id=77,
+    )
+    view = EventMessageView(view_state=state, controller=controller)
+    view.bind_message_context(message_id=55, channel_id=10, guild_id=1)
+    bot = MagicMock()
+    bot.add_view = MagicMock()
+    view.attach_discord_bot(bot)
+
+    snap = await controller.get_snapshot(message_id=55, view_state=view.view_state)
+    bot.add_view.reset_mock()
+    view.apply_snapshot(snap)
+
+    registered_ids = {call.kwargs.get("message_id") for call in bot.add_view.call_args_list}
+    assert 55 in registered_ids
+    assert 77 in registered_ids
+    # Fresh children must point back at this LayoutView (not None).
+    for item in view.walk_children():
+        if getattr(item, "custom_id", None):
+            assert item.view is view
+
+
 async def test_runtime_bind_and_register(tmp_path: Path) -> None:
     store = RsvpMessageStore.load(tmp_path / "rt.db")
     controller = RsvpController(store=store)
@@ -139,6 +185,7 @@ async def test_runtime_bind_and_register(tmp_path: Path) -> None:
         event_description="d",
     )
     view = EventMessageView(view_state=state, controller=controller)
+    view.set_event_card_message_id(9001)
     active: dict[int, EventMessageView] = {}
 
     class _Msg:
@@ -158,7 +205,11 @@ async def test_runtime_bind_and_register(tmp_path: Path) -> None:
     assert warning is None
     assert 555 in active
     assert active[555] is view
-    bot.add_view.assert_called_once()
+    assert bot.add_view.call_count == 2
+    registered_message_ids = {
+        call.kwargs.get("message_id") for call in bot.add_view.call_args_list
+    }
+    assert registered_message_ids == {555, 9001}
     assert store.get_message(555) is not None
 
 
@@ -177,6 +228,7 @@ async def test_hydrate_persistent_views_registers_from_store_without_fetch(
         room_url=None,
         edition_image_url=None,
         event_description="d",
+        event_card_message_id=4242,
     )
     controller.bind_message(message_id=42, channel_id=7, guild_id=1, view_state=state)
     await controller.set_status(
@@ -203,7 +255,11 @@ async def test_hydrate_persistent_views_registers_from_store_without_fetch(
     assert 42 in active
     assert active[42].view_state.event_name == "hydrated"
     assert active[42].responses[9].status == "Maybe"
-    bot.add_view.assert_called_once()
+    assert bot.add_view.call_count == 2
+    registered_message_ids = {
+        call.kwargs.get("message_id") for call in bot.add_view.call_args_list
+    }
+    assert registered_message_ids == {42, 4242}
     # Second call is a no-op when already hydrated.
     again = await rsvp_runtime.hydrate_persistent_views(
         already_hydrated=True,
@@ -214,7 +270,7 @@ async def test_hydrate_persistent_views_registers_from_store_without_fetch(
         controller=controller,
     )
     assert again is True
-    assert bot.add_view.call_count == 1
+    assert bot.add_view.call_count == 2
 
 
 async def test_resolve_active_view_rehydrates_and_cleans_missing(

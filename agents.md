@@ -2,7 +2,7 @@
 ## Learnings from implementation iterations
 - Prefer plain message content for RSVP updates when users want less visual noise; this keeps edits deterministic and avoids embed layout churn.
 - Discord controls URL unfurl behavior and image preview sizes, so UI requests around image sizing/positioning often need product-level compromises (emoji + text is the most stable compact option).
-- If an event embed should appear above editable RSVP content, post the event URL as a separate message first, then post the editable RSVP message with buttons/reactions.
+- If an event embed should appear above editable RSVP content, post the event URL as a separate companion message first (with **Koppla evenemang**), then post the editable RSVP message with RSVP/room buttons.
 - Reaction precedence must be explicit when multiple emojis are present to avoid nondeterministic status assignment.
 - Keep fallback behavior for optional cosmetic assets (edition emoji/logo): missing visual assets should never block posting or editing.
 - `Storyteller` Discord role (room-management permission) is separate from RSVP status `Storyteller` (a user response choice); never treat these as the same concept.

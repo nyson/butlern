@@ -51,10 +51,24 @@ def register_view(
     if message_id is None:
         return
     active_views[message_id] = view
+    # Keep bot on the view so later clear_items()/rebuild can refresh ViewStore
+    # bindings (stale button objects otherwise have item.view is None).
+    view.attach_discord_bot(bot)
     try:
         bot.add_view(view, message_id=message_id)
     except ValueError:
         logger.exception("Failed to register persistent view for message %s", message_id)
+    card_id = view.event_card_message_id or view.view_state.event_card_message_id
+    if card_id is None:
+        return
+    try:
+        bot.add_view(view.build_event_card_view(), message_id=card_id)
+    except ValueError:
+        logger.exception(
+            "Failed to register persistent event-card view for message %s (rsvp=%s)",
+            card_id,
+            message_id,
+        )
 
 
 def drop_view(

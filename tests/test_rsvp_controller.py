@@ -5,9 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, cast
 
+import discord
 import pytest
 
-from butler.design import AVAILABLE_EMOJI, RSVP_FOOTER_TEXT
+from butler.design import AVAILABLE_EMOJI, RSVP_EMPTY_PLACEHOLDER
 from butler.domains.result import Ok
 from butler.domains.rsvp.store import RsvpMessageStore
 from butler.domains.rsvp.types import ViewState
@@ -332,7 +333,24 @@ async def test_render_includes_title_statuses_and_footer(
     assert "desc" in content
     assert AVAILABLE_EMOJI in content
     assert "<@7> (21:00)" in content
-    assert RSVP_FOOTER_TEXT in content
+    # Empty status lists are omitted; placeholder only when all are empty.
+    assert RSVP_EMPTY_PLACEHOLDER not in content
+    assert "förmodligen" not in content
+    assert "Kan inte" not in content
+
+
+async def test_render_shows_placeholder_when_all_status_sections_empty(
+    controller: RsvpController,
+    state: ViewState,
+) -> None:
+    snap = await controller.get_snapshot(message_id=None, view_state=state)
+    content = format_rsvp_body(snap)
+    assert "🎲 Game Night" in content
+    assert RSVP_EMPTY_PLACEHOLDER in content
+    assert AVAILABLE_EMOJI not in content
+    assert "Jag vill vara med" not in content
+    assert "förmodligen" not in content
+    assert "Kan inte" not in content
 
 
 async def test_view_layout_is_body_plus_three_action_rows(
@@ -348,6 +366,14 @@ async def test_view_layout_is_body_plus_three_action_rows(
     assert isinstance(view.children[1], RsvpStatusActions)
     assert isinstance(view.children[2], RsvpMetaActions)
     assert isinstance(view.children[3], RoomActions)
+
+    with_logo = _view_state(
+        event_url="https://discord.com/events/1/2",
+        edition_image_url="https://cdn.example/edition.png",
+    )
+    logo_view = EventMessageView(view_state=with_logo, controller=controller)
+    assert len(logo_view.children) == 4
+    assert isinstance(logo_view.children[0], discord.ui.Section)
 
 
 async def test_render_room_open_line(
@@ -388,7 +414,11 @@ async def test_view_apply_snapshot_builds_action_rows(
     assert isinstance(view.children[2], RsvpMetaActions)
     assert isinstance(view.children[3], RoomActions)
     room_ids = {cast(Any, child).custom_id for child in _room_actions(view).children}
-    assert "butler:rsvp:select-event" in room_ids
+    assert "butler:rsvp:select-event" not in room_ids
+    assert "butler:rsvp:open-room" in room_ids
+    card = view.build_event_card_view()
+    card_ids = {cast(Any, child).custom_id for child in card.children}
+    assert "butler:rsvp:select-event" in card_ids
 
 
 async def test_view_apply_snapshot_is_idempotent(
@@ -410,7 +440,9 @@ async def test_room_actions_visibility_pending_vs_open(
     room_row = _room_actions(view)
     labels = [cast(Any, child).label for child in room_row.children]
     assert any(label and "Öppna" in label for label in labels)
-    assert any(label and "Koppla evenemang" in label for label in labels)
+    assert not any(label and "Koppla evenemang" in label for label in labels)
+    card_labels = [cast(Any, child).label for child in view.build_event_card_view().children]
+    assert any(label and "Koppla evenemang" in label for label in card_labels)
 
     result = await controller.open_room(
         message_id=None,
@@ -424,7 +456,7 @@ async def test_room_actions_visibility_pending_vs_open(
     room_row = _room_actions(view)
     labels = [cast(Any, child).label for child in room_row.children]
     assert any(label and "Stäng" in label for label in labels)
-    assert any(label and "Koppla evenemang" in label for label in labels)
+    assert not any(label and "Koppla evenemang" in label for label in labels)
 
 
 async def test_view_bind_message_context_persists(

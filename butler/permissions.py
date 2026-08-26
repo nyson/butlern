@@ -5,6 +5,8 @@ import discord
 from butler.design import (
     ROOM_LINK_PERMISSION_DENIED_MESSAGE,
     ROOM_LINK_PERMISSION_DENIED_ROLE_TEMPLATE,
+    SELECT_EVENT_PERMISSION_DENIED_MESSAGE,
+    SELECT_EVENT_PERMISSION_DENIED_ROLE_TEMPLATE,
 )
 from butler.domains.permissions.domain import can_manage_events as can_manage_events
 from butler.domains.permissions.domain import format_permissions as format_permissions
@@ -61,6 +63,24 @@ def room_permission_denied_message(
         role_mention=role.mention if role is not None else None,
         without_role=ROOM_LINK_PERMISSION_DENIED_MESSAGE,
         with_role_template=ROOM_LINK_PERMISSION_DENIED_ROLE_TEMPLATE,
+    )
+
+
+def select_event_permission_denied_message(
+    interaction: discord.Interaction,
+    *,
+    event_manager_role_id: int | None,
+) -> str:
+    guild = interaction.guild
+    role = (
+        guild.get_role(event_manager_role_id)
+        if guild is not None and event_manager_role_id is not None
+        else None
+    )
+    return permission_denied_message(
+        role_mention=role.mention if role is not None else None,
+        without_role=SELECT_EVENT_PERMISSION_DENIED_MESSAGE,
+        with_role_template=SELECT_EVENT_PERMISSION_DENIED_ROLE_TEMPLATE,
     )
 
 

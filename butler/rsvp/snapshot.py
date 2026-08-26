@@ -31,6 +31,10 @@ class RsvpRenderSnapshot:
         return self.view_state.edition_emoji
 
     @property
+    def edition_image_url(self) -> str | None:
+        return self.view_state.edition_image_url
+
+    @property
     def room_state(self) -> RoomState:
         return self.view_state.room_state
 

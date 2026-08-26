@@ -93,6 +93,7 @@ def make_scheduled_event(
     *,
     event_id: int = 555,
     name: str = "Game Night",
+    description: str | None = "Game night description",
     status: discord.EventStatus = discord.EventStatus.scheduled,
     start_time: dt.datetime | None = None,
     guild_id: int | None = None,
@@ -100,6 +101,7 @@ def make_scheduled_event(
     event = MagicMock(spec=discord.ScheduledEvent)
     event.id = event_id
     event.name = name
+    event.description = description
     event.status = status
     event.start_time = start_time or (dt.datetime.now(dt.UTC) + dt.timedelta(hours=1))
     if guild_id is not None:

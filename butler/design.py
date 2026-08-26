@@ -63,31 +63,39 @@ RSVP_STATUS_LABELS: Final[dict[RsvpStatus | RsvpRole, str]] = {
     "Maybe": "Jag kommer förmodligen, kan inte lova något",
     "Cant": "Kan inte ikväll 😞"
 }
-
-RSVP_FOOTER_TEXT: Final[str] = (
-    "Tryck på en knapp du tycker passar dig eller släng en emoji "
-    "på det här meddelandet för att registrera dig!"
+RSVP_EMPTY_PLACEHOLDER: Final[str] = (
+    "Ingen har satt upp sig på evenemanget än, du kan vara den första!"
 )
+
+# Canonical Discord custom-emoji *names* (full form). Lookups are case-insensitive
+# via EDITION_RESOURCE_ID_BY_NAME / resolve_edition_media, which also accepts short
+# codes (tb/bmr/snv). Guilds may host either the full name or the short code as the
+# actual emoji name; resolve_edition_media tries both (see EDITION_EMOJI_NAME_CANDIDATES).
 EDITION_RESOURCE_ID_BY_NAME: Final[dict[str, str]] = {
-    "bmr": "bmr",
-    "tb": "tb",
-    "snv": "snv",
+    "bmr": "bad_moon_rising",
+    "tb": "trouble_brewing",
+    "snv": "sects_and_violets",
     "custom": "custom",
-    "Custom": "custom",
-    "Bad Moon Rising": "bmr",
-    "Carousel": "custom",
-    "Fabled": "custom",
-    "Loric": "taf",
-    "Sects and Violets": "snv",
-    "Trouble Brewing": "tb",
+    "bad moon rising": "bad_moon_rising",
+    "carousel": "custom",
+    "fabled": "custom",
+    "loric": "custom",
+    "sects and violets": "sects_and_violets",
+    "trouble brewing": "trouble_brewing",
+}
+# Preferred emoji name first, then alternate guild naming (abbrev), for each resource id.
+EDITION_EMOJI_NAME_CANDIDATES: Final[dict[str, tuple[str, ...]]] = {
+    "trouble_brewing": ("trouble_brewing", "tb"),
+    "bad_moon_rising": ("bad_moon_rising", "bmr"),
+    "sects_and_violets": ("sects_and_violets", "snv"),
+    "custom": ("custom",),
 }
 EVENT_POST_TEMPLATE: Final[str] = (
     "# {title_line}\n"
     "{event_description}\n\n"
     "{event_section}"
     "{room_section}"
-    "{status_sections}\n\n"
-    "{footer_text}"
+    "{status_sections}"
 )
 ROOM_OPENED_MESSAGE_TEMPLATE: Final[str] = "**Rummet är öppet:** {room_url}"
 ROOM_CLOSED_MESSAGE: Final[str] = "**Rummet är nu stängt!** Tack för ikväll!"
@@ -99,12 +107,24 @@ ARRIVE_LATER_INVALID_TIME_MESSAGE: Final[str] = (
 )
 
 # Slash-command / autocomplete copy (Swedish product surface)
-EVENT_OPTION_DESCRIPTION: Final[str] = (
-    "Välj befintligt event eller låt Butlern skapa ett nytt"
+EVENT_GROUP_DESCRIPTION: Final[str] = "Posta RSVP via nytt eller befintligt Discord-event"
+EVENT_CREATE_SUBCOMMAND_DESCRIPTION: Final[str] = (
+    "Posta RSVP (skapa/länka Discord-event valfritt)"
+)
+EVENT_LINK_SUBCOMMAND_DESCRIPTION: Final[str] = (
+    "Länka ett befintligt Discord-event och posta RSVP"
+)
+EVENT_OPTION_DESCRIPTION: Final[str] = "Välj ett befintligt Discord-event"
+EVENT_CREATE_OPTION_DESCRIPTION: Final[str] = (
+    "Valfritt. Länka befintligt event, skapa nytt, eller utelämna för placeholder"
 )
 CREATE_NEW_EVENT_CHOICE_LABEL: Final[str] = "Låt Butlern skapa ett evenemang!"
 CREATE_NEW_EVENT_CHOICE_VALUE: Final[str] = "__butler_create_new_event__"
 EVENT_AUTOCOMPLETE_ERROR_TEMPLATE: Final[str] = "ett fel har hänt: {error}"
+EVENT_LINK_REQUIRED_MESSAGE: Final[str] = (
+    "Du måste välja ett befintligt Discord-event att länka."
+)
+EVENT_LINK_MISSING_DESCRIPTION_FALLBACK: Final[str] = "(Ingen beskrivning)"
 
 # Event linking (rsvp button-driven selection; not a slash option)
 SELECT_EVENT_BUTTON_LABEL: Final[str] = "Koppla evenemang"
@@ -119,14 +139,20 @@ SELECT_EVENT_MODAL_LABEL: Final[str] = "Event idag"
 SELECT_EVENT_PLACEHOLDER: Final[str] = "Välj ett event från cachen"
 SELECT_EVENT_EMPTY_MESSAGE: Final[str] = (
     "Inga återanvändbara Discord-event finns i cachen just nu. "
-    "Skapa/länka via knappen eller `/event`, eller vänta på att cachen uppdateras."
+    "Skapa/länka via knappen eller `/event create` / `/event link`, "
+    "eller vänta på att cachen uppdateras."
 )
 SELECT_EVENT_UPDATED_TEMPLATE: Final[str] = "RSVP länkad till **{event_name}**."
 SELECT_EVENT_CREATED_TEMPLATE: Final[str] = (
     "Skapade Discord-event **{event_name}** och länkade RSVP."
 )
 SELECT_EVENT_PERMISSION_DENIED_MESSAGE: Final[str] = (
-    "Du behöver storyteller-rollen för att koppla evenemang."
+    "Du behöver behörigheten `Hantera server` eller den konfigurerade "
+    "event-rollen för att koppla evenemang."
+)
+SELECT_EVENT_PERMISSION_DENIED_ROLE_TEMPLATE: Final[str] = (
+    "Du behöver behörigheten `Hantera server` eller rollen "
+    "{mention} för att koppla evenemang."
 )
 
 # Discord permission label as shown to Swedish guilds

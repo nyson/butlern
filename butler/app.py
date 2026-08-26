@@ -9,7 +9,14 @@ import butler.rsvp.event_command as rsvp_event_command
 import butler.settings_command as settings_command
 from butler.config import load_config
 from butler.constants import PERSISTANCE_PATH
-from butler.design import EVENT_OPTION_DESCRIPTION, ONBOARDING_MESSAGE
+from butler.design import (
+    EVENT_CREATE_OPTION_DESCRIPTION,
+    EVENT_CREATE_SUBCOMMAND_DESCRIPTION,
+    EVENT_GROUP_DESCRIPTION,
+    EVENT_LINK_SUBCOMMAND_DESCRIPTION,
+    EVENT_OPTION_DESCRIPTION,
+    ONBOARDING_MESSAGE,
+)
 from butler.discord_events import BOTC_EDITION_CHOICES
 from butler.discord_helpers import (
     get_bot_member,
@@ -53,22 +60,25 @@ on_scheduled_event_update = _REGISTERED_BOT_EVENTS.on_scheduled_event_update
 setup_hook = _REGISTERED_BOT_EVENTS.setup_hook
 
 
-@bot.tree.command(
+event_group = app_commands.Group(
     name="event",
-    description="Post an RSVP message, optionally linking a Discord event",
+    description=EVENT_GROUP_DESCRIPTION,
+    guild_only=True,
 )
-@app_commands.guild_only()
+
+
+@event_group.command(name="create", description=EVENT_CREATE_SUBCOMMAND_DESCRIPTION)
 @app_commands.describe(
     title="Event title",
     description="Event description text",
-    event=f"Optional. {EVENT_OPTION_DESCRIPTION}",
+    event=EVENT_CREATE_OPTION_DESCRIPTION,
     edition="Optional edition from BOTC resources",
     room_link="Optional room URL (http/https) to include in the post",
     start_time="Optional start time in 24h format HH:MM (default: 19:00)",
 )
 @app_commands.choices(edition=BOTC_EDITION_CHOICES)
-@app_commands.autocomplete(event=rsvp_event_command.autocomplete_existing_event)
-async def event(
+@app_commands.autocomplete(event=rsvp_event_command.autocomplete_existing_or_create_event)
+async def event_create(
     interaction: discord.Interaction,
     title: str,
     description: str,
@@ -77,7 +87,7 @@ async def event(
     room_link: str | None = None,
     start_time: str | None = None,
 ) -> None:
-    await rsvp_event_command.handle_event_command(
+    await rsvp_event_command.handle_event_create_command(
         interaction=interaction,
         title=title,
         description=description,
@@ -92,6 +102,39 @@ async def event(
         get_bot_member_fn=get_bot_member,
         resolve_text_channel_fn=resolve_text_channel,
     )
+
+
+@event_group.command(name="link", description=EVENT_LINK_SUBCOMMAND_DESCRIPTION)
+@app_commands.describe(
+    event=EVENT_OPTION_DESCRIPTION,
+    edition="Optional edition from BOTC resources",
+    room_link="Optional room URL (http/https) to include in the post",
+)
+@app_commands.choices(edition=BOTC_EDITION_CHOICES)
+@app_commands.autocomplete(event=rsvp_event_command.autocomplete_existing_event)
+async def event_link(
+    interaction: discord.Interaction,
+    event: str,
+    edition: app_commands.Choice[str] | None = None,
+    room_link: str | None = None,
+) -> None:
+    await rsvp_event_command.handle_event_link_command(
+        interaction=interaction,
+        event=event,
+        edition=edition,
+        room_link=room_link,
+        bot=bot,
+        settings_store=SETTINGS_STORE,
+        controller=RSVP_CONTROLLER,
+        active_views=ACTIVE_RSVP_VIEWS,
+        get_bot_member_fn=get_bot_member,
+        resolve_text_channel_fn=resolve_text_channel,
+    )
+
+
+bot.tree.add_command(event_group)
+# Back-compat aliases used by tests that invoke command callbacks directly.
+event = event_group
 
 
 @bot.tree.command(

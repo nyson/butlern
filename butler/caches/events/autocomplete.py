@@ -30,40 +30,80 @@ def create_new_choice() -> app_commands.Choice[str]:
     )
 
 
+def _cached_event_choices(
+    *,
+    guild: discord.Guild | None,
+    current: str,
+    include_create_new: bool,
+) -> list[app_commands.Choice[str]]:
+    if guild is None:
+        return [create_new_choice()] if include_create_new else []
+
+    if not event_option_cache_is_fresh(guild_id=guild.id):
+        raise EventOptionCacheColdError(
+            f"Event option cache is cold for guild {guild.id}; "
+            "slash commands should not be registered until warm."
+        )
+
+    candidates = list(AUTOCOMPLETE_EVENT_CACHE.get(guild.id, []))
+    query = current.strip().casefold()
+    if query:
+        candidates = [
+            option
+            for option in candidates
+            if query in option[0].casefold() or query in option[1]
+        ]
+    limit = MAX_EVENT_AUTOCOMPLETE_CHOICES
+    if include_create_new:
+        limit = max(0, MAX_EVENT_AUTOCOMPLETE_CHOICES - 1)
+    event_choices = [
+        app_commands.Choice(name=name, value=value)
+        for name, value in candidates[:limit]
+    ]
+    if include_create_new:
+        return [create_new_choice(), *event_choices]
+    return event_choices
+
+
 # NOSONAR - discord.py autocomplete callback is async by API contract.
 async def autocomplete_existing_event(
     interaction: discord.Interaction,
     current: str,
 ) -> list[app_commands.Choice[str]]:
-    """Return cache-backed choices only.
+    """Return cache-backed existing-event choices (no create-new sentinel).
 
     Commands that use this autocomplete must not be published while the event
     option cache is cold. A cold cache is a programming/ops error — raise.
     """
     try:
-        guild = interaction.guild
-        if guild is None:
-            return [create_new_choice()]
-
-        if not event_option_cache_is_fresh(guild_id=guild.id):
-            raise EventOptionCacheColdError(
-                f"Event option cache is cold for guild {guild.id}; "
-                "slash commands should not be registered until warm."
+        return _cached_event_choices(
+            guild=interaction.guild,
+            current=current,
+            include_create_new=False,
+        )
+    except EventOptionCacheColdError:
+        raise
+    except Exception as e:
+        return [
+            app_commands.Choice(
+                name=EVENT_AUTOCOMPLETE_ERROR_TEMPLATE.format(error=repr(e)),
+                value="fel",
             )
-
-        candidates = list(AUTOCOMPLETE_EVENT_CACHE.get(guild.id, []))
-        query = current.strip().casefold()
-        if query:
-            candidates = [
-                option
-                for option in candidates
-                if query in option[0].casefold() or query in option[1]
-            ]
-        event_choices = [
-            app_commands.Choice(name=name, value=value)
-            for name, value in candidates[: max(0, MAX_EVENT_AUTOCOMPLETE_CHOICES - 1)]
         ]
-        return [create_new_choice(), *event_choices]
+
+
+# NOSONAR - discord.py autocomplete callback is async by API contract.
+async def autocomplete_existing_or_create_event(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    """Cache-backed choices plus the create-new sentinel (modal/button pickers)."""
+    try:
+        return _cached_event_choices(
+            guild=interaction.guild,
+            current=current,
+            include_create_new=True,
+        )
     except EventOptionCacheColdError:
         raise
     except Exception as e:

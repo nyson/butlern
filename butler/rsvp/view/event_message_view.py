@@ -3,10 +3,13 @@ from __future__ import annotations
 import logging
 from contextlib import suppress
 from dataclasses import replace
-from typing import TypeAlias
+from typing import TYPE_CHECKING, TypeAlias
 
 import discord
 from discord import ui
+
+if TYPE_CHECKING:
+    from discord.ext import commands
 
 from butler.caches.events import AUTOCOMPLETE_EVENT_CACHE, resolve_existing_event_for_command
 from butler.design import (
@@ -24,8 +27,6 @@ from butler.design import (
     ROOM_LINK_MODAL_INVALID_MESSAGE,
     ROOM_LINK_PROMPT_BUTTON_EMOJI,
     ROOM_LINK_PROMPT_BUTTON_LABEL,
-    SELECT_EVENT_BUTTON_EMOJI,
-    SELECT_EVENT_BUTTON_LABEL,
     SELECT_EVENT_EMPTY_MESSAGE,
     STORYTELLER_BUTTON_LABEL,
     STORYTELLER_EMOJI,
@@ -35,14 +36,19 @@ from butler.domains.result import Err, Ok, ServiceError
 from butler.domains.rsvp.domain import RsvpResponse, visible_room_buttons
 from butler.domains.rsvp.types import RsvpStatus, ViewState
 from butler.event_logic import normalize_room_url
-from butler.permissions import can_manage_room_action, room_permission_denied_message
+from butler.permissions import (
+    can_manage_room_action,
+    room_permission_denied_message,
+    select_event_permission_denied_message,
+)
 from butler.rsvp.controller import RsvpController
 from butler.rsvp.modals.arrive_later import ArriveLaterModal, parse_arrival_time
 from butler.rsvp.modals.room_link import RoomLinkModal
 from butler.rsvp.modals.select_event import SelectEventModal
 from butler.rsvp.room_announce import announce_room_opening
 from butler.rsvp.snapshot import RsvpRenderSnapshot
-from butler.rsvp.view.body import RsvpBodyDisplay, is_discord_scheduled_event_url
+from butler.rsvp.view.body import build_rsvp_body_item, is_discord_scheduled_event_url
+from butler.rsvp.view.event_card_view import EventCardView
 from butler.rsvp.view.event_select import build_event_select_options
 from butler.settings_store import GuildSettingsStore
 
@@ -153,7 +159,7 @@ class RsvpMetaActions(ui.ActionRow["EventMessageView"]):
 
 
 class RoomActions(ui.ActionRow["EventMessageView"]):
-    """Storyteller row: link Discord event + open/close room."""
+    """Storyteller row: open/close room."""
 
     def __init__(self, root: EventMessageView) -> None:
         super().__init__()
@@ -163,19 +169,6 @@ class RoomActions(ui.ActionRow["EventMessageView"]):
             self.remove_item(self.open_room)
         if "close" not in visible:
             self.remove_item(self.close_room)
-
-    @ui.button(
-        label=SELECT_EVENT_BUTTON_LABEL,
-        emoji=SELECT_EVENT_BUTTON_EMOJI,
-        style=discord.ButtonStyle.secondary,
-        custom_id="butler:rsvp:select-event",
-    )
-    async def select_event(
-        self,
-        interaction: discord.Interaction,
-        _button: ui.Button[EventMessageView],
-    ) -> None:
-        await self.root.open_event_select(interaction)
 
     @ui.button(
         label=ROOM_LINK_PROMPT_BUTTON_LABEL,
@@ -227,12 +220,18 @@ class EventMessageView(ui.LayoutView):
         self.channel_id = channel_id
         self.guild_id = guild_id
         self.event_card_message_id = view_state.event_card_message_id
+        # Used to re-bind ViewStore entries after clear_items() rebuilds children.
+        self._discord_bot: commands.Bot | None = None
         self._rebuild()
 
     # --- local state / render -------------------------------------------------
 
     def snapshot(self) -> RsvpRenderSnapshot:
         return RsvpRenderSnapshot(view_state=self.view_state, responses=dict(self.responses))
+
+    def attach_discord_bot(self, bot: commands.Bot) -> None:
+        """Remember the bot so rebuilds can refresh persistent ViewStore bindings."""
+        self._discord_bot = bot
 
     def apply_snapshot(self, snapshot: RsvpRenderSnapshot) -> None:
         self.view_state = snapshot.view_state
@@ -241,12 +240,44 @@ class EventMessageView(ui.LayoutView):
         self._rebuild()
 
     def _rebuild(self) -> None:
+        # clear_items() sets item.view = None on old children. discord.py's ViewStore
+        # still holds those button objects until add_view replaces them — without a
+        # re-register, clicks log "unknown view" and are discarded.
         self.clear_items()
         snapshot = self.snapshot()
-        self.add_item(RsvpBodyDisplay(snapshot))
+        self.add_item(build_rsvp_body_item(snapshot))
         self.add_item(RsvpStatusActions(self))
         self.add_item(RsvpMetaActions(self))
         self.add_item(RoomActions(self))
+        self._reregister_persistent_components()
+
+    def _reregister_persistent_components(self) -> None:
+        bot = self._discord_bot
+        message_id = self.message_id
+        if bot is None or message_id is None:
+            return
+        try:
+            bot.add_view(self, message_id=message_id)
+        except ValueError:
+            logger.exception(
+                "Failed to re-register RSVP view after rebuild message_id=%s",
+                message_id,
+            )
+        card_id = self.event_card_message_id or self.view_state.event_card_message_id
+        if card_id is None:
+            return
+        try:
+            bot.add_view(self.build_event_card_view(), message_id=card_id)
+        except ValueError:
+            logger.exception(
+                "Failed to re-register event-card view after rebuild card_id=%s rsvp=%s",
+                card_id,
+                message_id,
+            )
+
+    def build_event_card_view(self) -> EventCardView:
+        """Build companion event-message controls bound to this RSVP."""
+        return EventCardView(rsvp_view=self)
 
     def set_event_card_message_id(self, message_id: int | None) -> None:
         """Remember companion event-card message id on local + persisted view state."""
@@ -307,13 +338,17 @@ class EventMessageView(ui.LayoutView):
         )
 
     def _ensure_message_context(self, interaction: discord.Interaction) -> None:
+        """Fill missing channel/guild ids from the interaction.
+
+        Never adopt ``interaction.message.id`` as the RSVP message id: the link
+        button lives on the companion event card, so that message is a different id.
+        """
         message = interaction.message
-        if message is None:
-            return
-        if self.message_id is None:
-            self.message_id = message.id
         if self.channel_id is None:
-            self.channel_id = message.channel.id
+            if message is not None:
+                self.channel_id = message.channel.id
+            elif interaction.channel is not None:
+                self.channel_id = interaction.channel.id
         if self.guild_id is None and interaction.guild is not None:
             self.guild_id = interaction.guild.id
 
@@ -355,9 +390,12 @@ class EventMessageView(ui.LayoutView):
                         self.channel_id,
                     )
 
+        # Only edit interaction.message when it is the RSVP root (not the event card).
         message = interaction.message
-        if message is not None and (
-            self.message_id is None or message.id == self.message_id
+        if (
+            message is not None
+            and self.message_id is not None
+            and message.id == self.message_id
         ):
             try:
                 await message.edit(view=self)
@@ -549,7 +587,10 @@ class EventMessageView(ui.LayoutView):
         role_id = self.event_manager_role_id(interaction)
         if not can_manage_room_action(interaction, event_manager_role_id=role_id):
             await interaction.response.send_message(
-                room_permission_denied_message(interaction, event_manager_role_id=role_id),
+                select_event_permission_denied_message(
+                    interaction,
+                    event_manager_role_id=role_id,
+                ),
                 ephemeral=True,
             )
             return
@@ -594,7 +635,10 @@ class EventMessageView(ui.LayoutView):
         role_id = self.event_manager_role_id(interaction)
         if not can_manage_room_action(interaction, event_manager_role_id=role_id):
             await interaction.response.send_message(
-                room_permission_denied_message(interaction, event_manager_role_id=role_id),
+                select_event_permission_denied_message(
+                    interaction,
+                    event_manager_role_id=role_id,
+                ),
                 ephemeral=True,
             )
             return
@@ -664,7 +708,7 @@ class EventMessageView(ui.LayoutView):
         if card_id is not None:
             try:
                 partial = discord.PartialMessage(channel=channel, id=card_id)
-                await partial.edit(content=event_url)
+                await partial.edit(content=event_url, view=self.build_event_card_view())
                 return
             except (discord.HTTPException, discord.NotFound, TypeError):
                 logger.exception(
@@ -674,7 +718,10 @@ class EventMessageView(ui.LayoutView):
                 self.set_event_card_message_id(None)
 
         try:
-            posted = await channel.send(content=event_url)
+            posted = await channel.send(
+                content=event_url,
+                view=self.build_event_card_view(),
+            )
         except (discord.HTTPException, discord.Forbidden):
             logger.exception("Failed posting event card url=%s", event_url)
             return

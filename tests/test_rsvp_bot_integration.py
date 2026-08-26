@@ -7,6 +7,7 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
+from discord import app_commands
 
 import butler.app as app
 from butler.domains.result import Ok
@@ -29,6 +30,7 @@ def test_event_command_is_registered_on_bot_tree() -> None:
     names = {cmd.name for cmd in app.bot.tree.get_commands()}
     assert "event" in names
     event_group = next(cmd for cmd in app.bot.tree.get_commands() if cmd.name == "event")
+    assert isinstance(event_group, app_commands.Group)
     subcommands = {cmd.name: cmd for cmd in event_group.commands}
     assert {"create", "link"}.issubset(subcommands)
 

@@ -5,10 +5,8 @@ from dataclasses import dataclass
 from typing import Final
 
 from butler.design import STORYTELLER_EMOJI
-from butler.rsvp.types import RoomButton, RoomState, RsvpRole, RsvpStatus
+from butler.domains.rsvp.types import RoomButton, RoomState, RsvpRole, RsvpStatus
 
-# Order in which reaction-derived statuses win when a user holds several reactions
-# at once: Maybe > Cant > Available. Storyteller is tracked as a role, not a status.
 REACTION_STATUS_PRECEDENCE: Final[tuple[RsvpStatus, ...]] = (
     "Maybe",
     "Cant",
@@ -18,14 +16,11 @@ REACTION_STATUS_PRECEDENCE: Final[tuple[RsvpStatus, ...]] = (
 
 @dataclass(frozen=True)
 class RoomSnapshot:
-    """Immutable result of a room-lifecycle transition: the state and its URL."""
-
     state: RoomState
     url: str | None
 
     @classmethod
     def from_url(cls, room_url: str | None) -> RoomSnapshot:
-        """Setting a URL opens the room; clearing it reverts to `pending`."""
         if room_url is None:
             return cls(state="pending", url=None)
         return cls(state="open", url=room_url)
@@ -36,10 +31,6 @@ class RoomSnapshot:
 
 
 def visible_room_buttons(room_state: RoomState) -> frozenset[RoomButton]:
-    """Which room-action buttons should be visible for a given room state.
-
-    `open`: only the close button. `pending`/`closed`: only the open/prompt button.
-    """
     if room_state == "open":
         return frozenset({"close"})
     return frozenset({"open_or_prompt"})
@@ -53,7 +44,6 @@ class RsvpResponse:
 
 
 def status_from_emoji(emoji: str, emoji_to_status: Mapping[str, RsvpStatus]) -> RsvpStatus:
-    """Map a single reaction emoji to a status. Unrecognized emojis count as `Available`."""
     return emoji_to_status.get(emoji, "Available")
 
 
@@ -61,10 +51,6 @@ def status_from_emojis(
     emojis: Iterable[str],
     emoji_to_status: Mapping[str, RsvpStatus],
 ) -> RsvpStatus | None:
-    """Resolve the effective status for a user holding `emojis`, applying precedence.
-
-    Returns `None` when no emojis are present (the user has no relevant reactions left).
-    """
     present = {status_from_emoji(emoji, emoji_to_status) for emoji in emojis}
     if not present:
         return None
@@ -97,20 +83,54 @@ def mentions_for_status(responses: dict[int, RsvpResponse], status: RsvpStatus) 
         for user_id, response in responses.items()
         if response.status == status
     ]
-    ordered_responses.sort(
-        key=lambda pair: 0 if pair[1].role == "Storyteller" else 1,
-    )
+    ordered_responses.sort(key=lambda pair: 0 if pair[1].role == "Storyteller" else 1)
     mentions: list[str] = []
     for user_id, response in ordered_responses:
-
         st_emoji = (response.role == "Storyteller" and f" {STORYTELLER_EMOJI}") or ""
         arrival = (response.arrival_time and f" ({response.arrival_time})") or ""
         mentions.append(f"{st_emoji}<@{user_id}>{arrival}")
-
     if not mentions:
         return None
-
     preview = ", ".join(mentions[:15])
     if len(mentions) > 15:
         preview += f" (+{len(mentions) - 15} more)"
     return preview
+
+
+def apply_status_update(
+    current: RsvpResponse,
+    *,
+    status: RsvpStatus,
+    arrival_time: str | None = None,
+) -> RsvpResponse:
+    return RsvpResponse(
+        status=status,
+        role=("Player" if status == "Cant" else current.role),
+        arrival_time=(
+            None
+            if status == "Cant"
+            else (arrival_time if arrival_time is not None else current.arrival_time)
+        ),
+    )
+
+
+def apply_storyteller_role(current: RsvpResponse, *, is_storyteller: bool) -> RsvpResponse:
+    if is_storyteller:
+        return RsvpResponse(
+            status=((current.status != "Cant") and current.status) or "Available",
+            role="Storyteller",
+            arrival_time=None if current.status == "Cant" else current.arrival_time,
+        )
+    return RsvpResponse(
+        status=current.status,
+        role="Player",
+        arrival_time=current.arrival_time,
+    )
+
+
+def apply_arrival_time(current: RsvpResponse, *, arrival_time: str) -> RsvpResponse:
+    return RsvpResponse(
+        status=("Available" if current.status == "Cant" else current.status),
+        role=current.role,
+        arrival_time=arrival_time,
+    )

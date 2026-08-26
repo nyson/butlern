@@ -93,14 +93,22 @@ def make_scheduled_event(
     *,
     event_id: int = 555,
     name: str = "Game Night",
+    description: str | None = "Game night description",
     status: discord.EventStatus = discord.EventStatus.scheduled,
     start_time: dt.datetime | None = None,
+    guild_id: int | None = None,
 ) -> discord.ScheduledEvent:
     event = MagicMock(spec=discord.ScheduledEvent)
     event.id = event_id
     event.name = name
+    event.description = description
     event.status = status
     event.start_time = start_time or (dt.datetime.now(dt.UTC) + dt.timedelta(hours=1))
+    if guild_id is not None:
+        guild = MagicMock(spec=discord.Guild)
+        guild.id = guild_id
+        event.guild = guild
+        event.guild_id = guild_id
     return cast(discord.ScheduledEvent, event)
 
 
@@ -126,6 +134,15 @@ def make_guild(
 
     resolved_scheduled_events = list(scheduled_events or [])
     guild.fetch_scheduled_events = AsyncMock(return_value=resolved_scheduled_events)
+    guild.scheduled_events = resolved_scheduled_events
+    guild.get_scheduled_event = MagicMock(
+        side_effect=lambda event_id: next(
+            (event for event in resolved_scheduled_events if event.id == event_id),
+            None,
+        )
+    )
+    # No live HTTP client: force the typed-fetch path (not raw double-parse).
+    guild._state = None
 
     async def _fetch_scheduled_event(
         scheduled_event_id: int,

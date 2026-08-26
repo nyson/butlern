@@ -2,7 +2,6 @@
     "cSpell.words": [
         "blurple",
         "eventtoday",
-        "previeweventdesign",
         "rumslänk",
         "seteventchannel",
         "storytella"
@@ -15,5 +14,6 @@
     "python.testing.unittestEnabled": false,
     "python.testing.pytestEnabled": true,
     "python-envs.defaultEnvManager": "ms-python.python:poetry",
-    "python-envs.defaultPackageManager": "ms-python.python:poetry"
+    "python-envs.defaultPackageManager": "ms-python.python:poetry",
+    "python.analysis.languageServerMode": "full"
 }

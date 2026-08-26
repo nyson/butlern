@@ -1,12 +1,13 @@
-from typing import Literal
+from __future__ import annotations
 
-from attr import dataclass
+from dataclasses import dataclass
+from typing import Literal
 
 RsvpRole = Literal["Player", "Storyteller"]
 RsvpStatus = Literal["Available", "Maybe", "Cant"]
 RoomState = Literal["pending", "open", "closed"]
-# Logical room-action buttons, independent of which view renders them.
 RoomButton = Literal["open_or_prompt", "close"]
+
 
 @dataclass(frozen=True)
 class ViewState:
@@ -19,4 +20,5 @@ class ViewState:
     room_url: str | None
     edition_image_url: str | None
     event_description: str
-
+    # Companion channel message that holds the bare event URL (Discord event card).
+    event_card_message_id: int | None = None

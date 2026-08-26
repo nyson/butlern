@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 from collections.abc import Mapping, Sequence
 from typing import TypedDict, cast
 
@@ -35,8 +34,9 @@ def _normalize_interval(value: object) -> int | None:
 def _normalize_by_weekday(value: object) -> list[int] | None:
     if not isinstance(value, list):
         return None
+
     normalized: list[int] = []
-    for weekday in value:
+    for weekday in value: # pyright: ignore[reportUnknownVariableType]
         if not isinstance(weekday, int):
             return None
         if weekday < 0 or weekday > 6:
@@ -98,26 +98,23 @@ def recurrence_rules_from_raw_scheduled_events(
     return recurrence_by_event_id
 
 
-async def _fetch_raw_scheduled_events(guild: discord.Guild) -> list[Mapping[str, object]]:
-    state = getattr(guild, "_state", None)
-    http = getattr(state, "http", None)
-    if http is None:
-        return []
+async def fetch_raw_scheduled_events(guild: discord.Guild) -> list[Mapping[str, object]]:
+    """Fetch raw scheduled-event payloads (includes recurrence_rule).
 
-    fetch_many = getattr(http, "get_scheduled_events", None)
-    if not callable(fetch_many):
-        return []
-
-    raw_events_result = fetch_many(guild.id, with_user_count=False)
-    if not inspect.isawaitable(raw_events_result):
-        return []
-    raw_events = await raw_events_result
-    if not isinstance(raw_events, list):
+    Uses discord.py's private HTTP client because the public typed API does not
+    expose recurrence fields. Callers should treat this as the single private
+adapter for that limitation.
+    """
+    try:
+        # Private connection/http surface — intentional adapter boundary.
+        http = guild._state.http
+        raw_events = await http.get_scheduled_events(guild.id, with_user_count=False)
+    except AttributeError:
         return []
 
     return [
         cast(Mapping[str, object], event)
-        for event in raw_events
+        for event in raw_events  # pyright: ignore[reportUnknownVariableType]
         if isinstance(event, Mapping)
     ]
 
@@ -127,7 +124,7 @@ async def fetch_recurrence_rules_for_guild(
     guild: discord.Guild,
 ) -> dict[int, RecurrenceRulePayload]:
     try:
-        raw_events = await _fetch_raw_scheduled_events(guild)
+        raw_events = await fetch_raw_scheduled_events(guild)
     except (discord.Forbidden, HTTPException):
         return {}
     return recurrence_rules_from_raw_scheduled_events(raw_events)

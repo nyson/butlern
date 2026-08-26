@@ -4,6 +4,7 @@ import datetime as dt
 import os
 from pathlib import Path
 from typing import Final
+from zoneinfo import ZoneInfo
 
 PACKAGE_ROOT: Final[Path] = Path(__file__).resolve().parent
 PROJECT_ROOT: Final[Path] = PACKAGE_ROOT.parent
@@ -23,3 +24,4 @@ PERSISTANCE_PATH: Final[Path] = _path_from_env(
 DEFAULT_EVENT_START_TIME: Final[str] = "19:00"
 DEFAULT_EVENT_LOCATION: Final[str] = "Online"
 DEFAULT_EVENT_DURATION: Final[dt.timedelta] = dt.timedelta(hours=3)
+SWEDISH_TIMEZONE: Final[dt.tzinfo] = ZoneInfo("Europe/Stockholm")

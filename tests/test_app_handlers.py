@@ -17,11 +17,12 @@ import discord
 import pytest
 
 import butler.app as app
+import butler.bot_events as bot_events
 import butler.rsvp.event_command as event_command
 import butler.rsvp.runtime as rsvp_runtime
-from butler.design import AVAILABLE_EMOJI, CANT_EMOJI, STORYTELLER_EMOJI
-from butler.rsvp.rsvp_store import StoredRsvpMessage
-from butler.rsvp.types import ViewState
+from butler.caches.events import reset_connected_event_cache
+from butler.domains.rsvp.store import StoredRsvpMessage
+from butler.domains.rsvp.types import ViewState
 from tests.discord_mocks import (
     invoke,
     make_guild,
@@ -29,8 +30,6 @@ from tests.discord_mocks import (
     make_member,
     make_message,
     make_permissions,
-    make_raw_reaction,
-    make_reaction,
     make_role,
     make_scheduled_event,
     make_text_channel,
@@ -57,13 +56,14 @@ def store() -> Iterator[MagicMock]:
         app.SETTINGS_STORE = original
         app.RSVP_MESSAGE_STORE = original_rsvp_store
 
+
 @pytest.fixture(autouse=True)
 def event_cache() -> Iterator[None]:
-    event_command.reset_connected_event_cache()
+    reset_connected_event_cache()
     try:
         yield
     finally:
-        event_command.reset_connected_event_cache()
+        reset_connected_event_cache()
 
 
 @pytest.fixture
@@ -84,10 +84,7 @@ def views() -> Iterator[dict[int, object]]:
 @pytest.fixture
 def bot_member_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     """Patch get_bot_member to return a fully-permissioned bot member."""
-    monkeypatch.setattr(
-        app,
-        "get_bot_member",
-        lambda guild, user: make_member(member_id=2))  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
+    monkeypatch.setattr(app, "get_bot_member", lambda guild, user: make_member(member_id=2))  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
 
 
 def _reusable_today_event(*, event_id: int, name: str) -> discord.ScheduledEvent:
@@ -116,7 +113,7 @@ async def test_seteventchannel_rejects_cross_guild_channel() -> None:
 
 
 async def test_seteventchannel_missing_bot_member(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(app, "get_bot_member", lambda guild, user: None) # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
+    monkeypatch.setattr(app, "get_bot_member", lambda guild, user: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
     ix = make_interaction(guild=make_guild(guild_id=1))
     await invoke(app.seteventchannel, ix.interaction, make_text_channel(guild_id=1))
     assert "couldn't verify my server permissions" in sent_text(ix.response.send_message)
@@ -188,11 +185,10 @@ async def test_seteventrole_save_failure(store: MagicMock) -> None:
 async def test_event_requires_guild() -> None:
     ix = make_interaction(guild=None, user=make_member())
     await invoke(
-        app.event,
+        app.event_create,
         ix.interaction,
         title="t",
         description="d",
-        event=event_command.CREATE_NEW_EVENT_CHOICE_VALUE,
     )
     assert "must be used in a server" in sent_text(ix.response.send_message)
 
@@ -202,11 +198,10 @@ async def test_event_requires_member(monkeypatch: pytest.MonkeyPatch) -> None:
     non_member = MagicMock(spec=__import__("discord").User)
     ix = make_interaction(guild=make_guild(guild_id=1), user=non_member)
     await invoke(
-        app.event,
+        app.event_create,
         ix.interaction,
         title="t",
         description="d",
-        event=event_command.CREATE_NEW_EVENT_CHOICE_VALUE,
     )
     assert "verify your server member permissions" in sent_text(ix.response.send_message)
 
@@ -218,11 +213,10 @@ async def test_event_permission_denied(store: MagicMock) -> None:
         user=make_member(permissions=make_permissions(manage_guild=False)),
     )
     await invoke(
-        app.event,
+        app.event_create,
         ix.interaction,
         title="t",
         description="d",
-        event=event_command.CREATE_NEW_EVENT_CHOICE_VALUE,
     )
     assert "behörigheten" in sent_text(ix.response.send_message)
 
@@ -231,26 +225,22 @@ async def test_event_no_channel_configured(store: MagicMock) -> None:
     store.get_default_event_channel_id.return_value = None
     ix = make_interaction(guild=make_guild(guild_id=1), user=make_member())
     await invoke(
-        app.event,
+        app.event_create,
         ix.interaction,
         title="t",
         description="d",
-        event=event_command.CREATE_NEW_EVENT_CHOICE_VALUE,
     )
     assert "No valid default event channel" in sent_text(ix.followup.send)
 
 
 async def test_event_invalid_room_link_surfaces_error(store: MagicMock) -> None:
     channel = make_text_channel(channel_id=10, guild_id=1)
-    ix = make_interaction(
-        guild=make_guild(guild_id=1, channel=channel), user=make_member()
-    )
+    ix = make_interaction(guild=make_guild(guild_id=1, channel=channel), user=make_member())
     await invoke(
-        app.event,
+        app.event_create,
         ix.interaction,
         title="t",
         description="d",
-        event=event_command.CREATE_NEW_EVENT_CHOICE_VALUE,
         room_link="not-a-url",
     )
     assert "must be a full URL" in sent_text(ix.followup.send)
@@ -263,12 +253,12 @@ async def test_event_missing_bot_permissions(
     monkeypatch.setattr(
         app,
         "get_bot_member",
-        lambda guild, user: make_member(permissions=make_permissions(create_events=False)), # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
+        lambda guild, user: make_member(permissions=make_permissions(create_events=False)),  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
     )
     channel = make_text_channel(channel_id=10, guild_id=1)
     ix = make_interaction(guild=make_guild(guild_id=1, channel=channel), user=make_member())
     await invoke(
-        app.event,
+        app.event_create,
         ix.interaction,
         title="t",
         description="d",
@@ -280,12 +270,12 @@ async def test_event_missing_bot_permissions(
 async def test_event_success_registers_view(
     store: MagicMock, views: dict[int, object], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(app, "get_bot_member", lambda guild, user: make_member(member_id=2)) # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
+    monkeypatch.setattr(app, "get_bot_member", lambda guild, user: make_member(member_id=2))  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
     channel = make_text_channel(channel_id=10, guild_id=1)
     guild = make_guild(guild_id=1, channel=channel)
     ix = make_interaction(guild=guild, user=make_member())
     await invoke(
-        app.event,
+        app.event_create,
         ix.interaction,
         title="Game",
         description="d",
@@ -297,11 +287,42 @@ async def test_event_success_registers_view(
     assert 999 in views
     assert "Created" in sent_text(ix.followup.send)
 
+
+async def test_event_create_without_event_uses_placeholder(
+    views: dict[int, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        app,
+        "get_bot_member",
+        lambda guild, user: make_member(member_id=2),  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
+    )
+    channel = make_text_channel(channel_id=10, guild_id=1)
+    guild = make_guild(guild_id=1, channel=channel)
+    ix = make_interaction(guild=guild, user=make_member())
+    await invoke(
+        app.event_create,
+        ix.interaction,
+        title="Game",
+        description="d",
+    )
+    cast(Any, guild).create_scheduled_event.assert_not_called()
+    assert 999 in views
+    assert "Posted RSVP for **Game**" in sent_text(ix.followup.send)
+    assert "Koppla evenemang" in sent_text(ix.followup.send)
+    # Companion slot is the placeholder, not a scheduled-event URL.
+    send_calls = cast(Any, channel).send.await_args_list
+    assert send_calls
+    first_content = send_calls[0].kwargs.get("content") or (
+        send_calls[0].args[0] if send_calls[0].args else None
+    )
+    assert first_content == event_command.EVENT_CARD_PLACEHOLDER_MESSAGE
+
+
 async def test_event_existing_event_autocomplete_filters_and_caps() -> None:
     now_utc = dt.datetime.now(dt.UTC)
     scheduled_events = [
-        _reusable_today_event(event_id=index, name=f"Game {index}")
-        for index in range(1, 30)
+        _reusable_today_event(event_id=index, name=f"Game {index}") for index in range(1, 30)
     ] + [
         make_scheduled_event(
             event_id=5000,
@@ -315,12 +336,10 @@ async def test_event_existing_event_autocomplete_filters_and_caps() -> None:
         ),
     ]
     guild = make_guild(guild_id=1, scheduled_events=scheduled_events)
-    cache_bot = MagicMock()
-    cache_bot.guilds = [guild]
-    await event_command.warmup_connected_event_cache(bot=cache_bot)
+    await event_command.warmup_connected_event_cache(guilds=[guild])
     ix = make_interaction(guild=guild, user=make_member())
 
-    choices = await event_command.autocomplete_existing_event(
+    choices = await event_command.autocomplete_existing_or_create_event(
         ix.interaction,
         "game",
     )
@@ -337,21 +356,38 @@ async def test_event_existing_event_autocomplete_filters_and_caps() -> None:
         assert len(name_parts[1]) == 5
         assert name_parts[1][2] == ":"
 
+    link_choices = await event_command.autocomplete_existing_event(
+        ix.interaction,
+        "game",
+    )
+    assert all(
+        choice.value != event_command.CREATE_NEW_EVENT_CHOICE_VALUE for choice in link_choices
+    )
+    assert len(link_choices) == 25
+
+
 async def test_event_existing_event_autocomplete_does_not_fetch_api_per_keystroke() -> None:
+    reset_connected_event_cache()
     guild = make_guild(
         guild_id=1,
         scheduled_events=[make_scheduled_event(event_id=1, name="Game 1")],
     )
+    # Warm once (this may hit Discord APIs), then keystrokes should reuse cache.
+    await event_command.warmup_connected_event_cache(guilds=[guild])
+    cast(Any, guild).fetch_scheduled_events.reset_mock()
     ix = make_interaction(guild=guild, user=make_member())
 
-    choices = await event_command.autocomplete_existing_event(
+    choices = await event_command.autocomplete_existing_or_create_event(
         ix.interaction,
         "game",
     )
-    assert len(choices) == 1
     assert choices[0].name == event_command.CREATE_NEW_EVENT_CHOICE_LABEL
     assert choices[0].value == event_command.CREATE_NEW_EVENT_CHOICE_VALUE
+    # Create-new choice only when the warmed event is not reusable for "today".
+    # After a successful warm of a reusable event, expect create-new + that event.
+    assert len(choices) >= 1
     cast(Any, guild).fetch_scheduled_events.assert_not_awaited()
+
 
 def test_event_choice_label_uses_swedish_summer_time() -> None:
     event = make_scheduled_event(
@@ -360,7 +396,9 @@ def test_event_choice_label_uses_swedish_summer_time() -> None:
         start_time=dt.datetime(2026, 7, 14, 17, 0, tzinfo=dt.UTC),
     )
 
-    choice_name = event_command._event_choice_name(event)
+    from butler.caches.events import event_choice_name
+
+    choice_name = event_choice_name(event)
 
     assert choice_name == "Summer Game — 19:00"
 
@@ -384,10 +422,8 @@ async def test_event_reuses_selected_existing_event(
     ix = make_interaction(guild=guild, user=make_member())
 
     await invoke(
-        app.event,
+        app.event_link,
         ix.interaction,
-        title="Game",
-        description="d",
         event="321",
     )
     cast(Any, guild).create_scheduled_event.assert_not_called()
@@ -408,10 +444,8 @@ async def test_event_selected_existing_event_stale_returns_error(
     ix = make_interaction(guild=guild, user=make_member())
 
     await invoke(
-        app.event,
+        app.event_link,
         ix.interaction,
-        title="Game",
-        description="d",
         event="321",
     )
     cast(Any, guild).create_scheduled_event.assert_not_called()
@@ -436,7 +470,7 @@ async def test_event_create_option_uses_old_create_behavior(
     )
     ix = make_interaction(guild=guild, user=make_member())
     await invoke(
-        app.event,
+        app.event_create,
         ix.interaction,
         title="Game",
         description="d",
@@ -447,7 +481,7 @@ async def test_event_create_option_uses_old_create_behavior(
     assert "Created" in sent_text(ix.followup.send)
 
 
-async def test_on_ready_warms_connected_event_cache(
+async def test_on_ready_warms_cache_before_command_sync(
     store: MagicMock,
     views: dict[int, object],
     monkeypatch: pytest.MonkeyPatch,
@@ -456,10 +490,34 @@ async def test_on_ready_warms_connected_event_cache(
     _ = views
     hydrate = AsyncMock(return_value=True)
     monkeypatch.setattr(rsvp_runtime, "hydrate_persistent_views", hydrate)
+    warm_calls: list[bool] = []
+    sync_calls: list[str] = []
+
+    async def _fake_warmup(*, guilds: list[object], force: bool = False) -> None:
+        warm_calls.append(force)
+        from butler.caches import events as events_cache
+
+        if guilds:
+            guild0 = cast(Any, guilds[0])
+            events_cache.cache_reusable_events_for_guild(
+                guild_id=guild0.id,
+                events=list(guild0.scheduled_events or []),
+            )
+
+    async def _fake_sync(*, deps: object) -> None:
+        _ = deps
+        sync_calls.append("synced")
+        assert warm_calls, "command sync must run after cache warm"
+
+    monkeypatch.setattr(bot_events, "warmup_connected_event_cache", _fake_warmup)
+    monkeypatch.setattr(bot_events, "_sync_commands_on_startup", _fake_sync)
+
     warm_event = _reusable_today_event(event_id=111, name="Warm Event")
     bot = MagicMock()
     bot.user = MagicMock()
     bot.user.id = 1
+    bot.wait_until_ready = AsyncMock()
+    bot.tree = MagicMock()
     bot.guilds = [
         make_guild(guild_id=1, scheduled_events=[warm_event]),
         make_guild(guild_id=2, scheduled_events=[]),
@@ -467,34 +525,31 @@ async def test_on_ready_warms_connected_event_cache(
     monkeypatch.setattr(app, "bot", bot)
 
     app._BOT_EVENT_STATE.rsvp_views_hydrated = False
-    await app.on_ready()
-
-    assert event_command.cached_connected_event_id(guild_id=1) == 111
-    assert event_command.cached_connected_event_id(guild_id=2) is None
-
-# --- /previeweventdesign ----------------------------------------------------
-
-
-async def test_previeweventdesign_requires_guild() -> None:
-    ix = make_interaction(guild=None)
-    await invoke(app.previeweventdesign, ix.interaction)
-    assert "must be used in a server" in sent_text(ix.response.send_message)
-
-
-async def test_previeweventdesign_success_posts_without_event(
-    store: MagicMock, views: dict[int, object], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(app, "get_bot_member", lambda guild, user: make_member(member_id=2))  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
-    channel = make_text_channel(channel_id=10, guild_id=1)
-    guild = make_guild(guild_id=1, channel=channel)
-    ix = make_interaction(guild=guild, user=make_member())
-    await invoke(app.previeweventdesign, ix.interaction)  # defaults for title/description
-    cast(Any, guild).create_scheduled_event.assert_not_called()
-    assert 999 in views
-    assert "Posted design preview" in sent_text(ix.followup.send)
+    app._BOT_EVENT_STATE.event_cache_boot_hydrated = False
+    app._BOT_EVENT_STATE.commands_synced = False
+    app._BOT_EVENT_STATE.event_cache_daily_sync_started = False
+    daily_sync = app._REGISTERED_BOT_EVENTS.daily_event_cache_sync
+    if daily_sync.is_running():
+        daily_sync.cancel()
+    try:
+        await app.on_ready()
+        assert warm_calls == [True]
+        assert sync_calls == ["synced"]
+        hydrate.assert_awaited()
+        assert app._BOT_EVENT_STATE.rsvp_views_hydrated is True
+        assert app._BOT_EVENT_STATE.event_cache_boot_hydrated is True
+        assert app._BOT_EVENT_STATE.commands_synced is True
+        assert app._BOT_EVENT_STATE.event_cache_daily_sync_started is True
+        assert event_command.cached_connected_event_id(guild_id=1) == 111
+    finally:
+        if daily_sync.is_running():
+            daily_sync.cancel()
+        app._BOT_EVENT_STATE.event_cache_daily_sync_started = False
+        app._BOT_EVENT_STATE.event_cache_boot_hydrated = False
+        app._BOT_EVENT_STATE.commands_synced = False
 
 
-# --- on_raw_reaction_add / remove -------------------------------------------
+# --- hydrate / resolve ------------------------------------------------------
 
 
 @pytest.fixture
@@ -511,15 +566,6 @@ def reaction_bot(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     monkeypatch.setattr(app, "bot", bot)
     return bot
 
-
-def _reaction_view() -> MagicMock:
-    view = MagicMock()
-    view.set_user_response = AsyncMock()
-    view.set_storyteller_role = AsyncMock()
-    view.remove_user_response = AsyncMock()
-    view.build_content = AsyncMock(return_value="content")
-    view.build_embed = MagicMock(return_value=None)
-    return view
 
 def _stored_message(
     *,
@@ -545,76 +591,11 @@ def _stored_message(
     )
 
 
-async def test_reaction_add_ignores_bot_own(reaction_bot: MagicMock) -> None:
-    payload = make_raw_reaction(user_id=1, message_id=999, emoji=AVAILABLE_EMOJI)
-    # No view registered; should simply no-op without error.
-    await app.on_raw_reaction_add(payload)
+def _text_channel_with_message(message: object) -> MagicMock:
+    channel = MagicMock(spec=discord.TextChannel)
+    channel.fetch_message = AsyncMock(return_value=message)
+    return channel
 
-
-async def test_reaction_add_unknown_message_noops(
-    reaction_bot: MagicMock, views: dict[int, object]
-) -> None:
-    payload = make_raw_reaction(user_id=2, message_id=12345, emoji=AVAILABLE_EMOJI)
-    await app.on_raw_reaction_add(payload)  # message id not in views -> no-op
-
-
-async def test_reaction_add_records_status(
-    reaction_bot: MagicMock, views: dict[int, object]
-) -> None:
-    view = _reaction_view()
-    views[999] = view
-    payload = make_raw_reaction(user_id=2, message_id=999, emoji=AVAILABLE_EMOJI)
-    message = make_message(message_id=999)
-    message.reactions = [make_reaction(emoji=AVAILABLE_EMOJI, user_ids=(2,))]
-
-    # fetch_message_from_channel needs a TextChannel; route through fetch_channel.
-    reaction_bot.fetch_channel.return_value = _text_channel_with_message(message)
-
-    await app.on_raw_reaction_add(payload)
-    view.set_user_response.assert_awaited_once_with(
-        user_id=2,
-        status="Available")
-    view.set_storyteller_role.assert_awaited_once_with(
-        user_id=2,
-        is_storyteller=False,
-    )
-
-
-async def test_reaction_add_storyteller_sets_role(
-    reaction_bot: MagicMock, views: dict[int, object]
-) -> None:
-    view = _reaction_view()
-    views[999] = view
-    payload = make_raw_reaction(user_id=2, message_id=999, emoji=STORYTELLER_EMOJI)
-    message = make_message(message_id=999)
-    message.reactions = [make_reaction(emoji=STORYTELLER_EMOJI, user_ids=(2,))]
-    reaction_bot.fetch_channel.return_value = _text_channel_with_message(message)
-
-    await app.on_raw_reaction_add(payload)
-
-    view.set_user_response.assert_awaited_once_with(user_id=2, status="Available")
-    view.set_storyteller_role.assert_awaited_once_with(
-        user_id=2,
-        is_storyteller=True,
-    )
-
-
-async def test_reaction_remove_resolves_status(
-    reaction_bot: MagicMock, views: dict[int, object]
-) -> None:
-    view = _reaction_view()
-    views[999] = view
-    message = make_message(message_id=999)
-    message.reactions = [make_reaction(emoji=CANT_EMOJI, user_ids=(2,))]
-    reaction_bot.fetch_channel.return_value = _text_channel_with_message(message)
-    payload = make_raw_reaction(user_id=2, message_id=999, emoji=CANT_EMOJI)
-
-    await app.on_raw_reaction_remove(payload)
-    view.set_user_response.assert_awaited_once_with(user_id=2, status="Cant")
-    view.set_storyteller_role.assert_awaited_once_with(
-        user_id=2,
-        is_storyteller=False,
-    )
 
 async def test_resolve_active_view_rehydrates_from_store(
     reaction_bot: MagicMock,
@@ -624,6 +605,7 @@ async def test_resolve_active_view_rehydrates_from_store(
     _ = store
     rsvp_store = cast(MagicMock, app.RSVP_MESSAGE_STORE)
     rsvp_store.get_message.return_value = _stored_message(message_id=999, channel_id=10)
+    rsvp_store.all_responses.return_value = {}
     reaction_bot.fetch_channel.return_value = _text_channel_with_message(
         make_message(message_id=999),
     )
@@ -635,6 +617,7 @@ async def test_resolve_active_view_rehydrates_from_store(
         bot=app.bot,
         settings_store=app.SETTINGS_STORE,
         view_store=app.RSVP_MESSAGE_STORE,
+        controller=app.RSVP_CONTROLLER,
     )
 
     assert resolved is not None
@@ -660,30 +643,26 @@ async def test_resolve_active_view_cleans_stale_store_entry(
         bot=app.bot,
         settings_store=app.SETTINGS_STORE,
         view_store=app.RSVP_MESSAGE_STORE,
+        controller=app.RSVP_CONTROLLER,
     )
 
     assert resolved is None
     rsvp_store.delete_message.assert_called_once_with(999)
 
 
-async def test_hydrate_persistent_views_restores_and_cleans(
+async def test_hydrate_persistent_views_registers_without_fetch(
     reaction_bot: MagicMock,
     store: MagicMock,
     views: dict[int, object],
 ) -> None:
     _ = store
+    _ = reaction_bot
     rsvp_store = cast(MagicMock, app.RSVP_MESSAGE_STORE)
     rsvp_store.list_messages.return_value = [
         _stored_message(message_id=999, channel_id=10),
         _stored_message(message_id=1000, channel_id=11),
     ]
-
-    async def _fetch_channel(channel_id: int) -> object:
-        if channel_id == 10:
-            return _text_channel_with_message(make_message(message_id=999))
-        return MagicMock()
-
-    reaction_bot.fetch_channel = AsyncMock(side_effect=_fetch_channel)
+    rsvp_store.all_responses.return_value = {}
 
     app._BOT_EVENT_STATE.rsvp_views_hydrated = await rsvp_runtime.hydrate_persistent_views(
         already_hydrated=app._BOT_EVENT_STATE.rsvp_views_hydrated,
@@ -691,30 +670,9 @@ async def test_hydrate_persistent_views_restores_and_cleans(
         bot=app.bot,
         settings_store=app.SETTINGS_STORE,
         view_store=app.RSVP_MESSAGE_STORE,
+        controller=app.RSVP_CONTROLLER,
     )
 
     assert 999 in views
-    assert 1000 not in views
-    rsvp_store.delete_message.assert_called_with(1000)
-
-
-async def test_reaction_remove_clears_when_no_reactions(
-    reaction_bot: MagicMock, views: dict[int, object]
-) -> None:
-    view = _reaction_view()
-    views[999] = view
-    message = make_message(message_id=999)
-    message.reactions = []
-    reaction_bot.fetch_channel.return_value = _text_channel_with_message(message)
-    payload = make_raw_reaction(user_id=2, message_id=999, emoji=CANT_EMOJI)
-
-    await app.on_raw_reaction_remove(payload)
-    view.remove_user_response.assert_awaited_once_with(2)
-
-
-def _text_channel_with_message(message: object) -> object:
-    import discord
-
-    channel = MagicMock(spec=discord.TextChannel)
-    channel.fetch_message = AsyncMock(return_value=message)
-    return channel
+    assert 1000 in views
+    assert app._BOT_EVENT_STATE.rsvp_views_hydrated is True

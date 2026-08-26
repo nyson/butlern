@@ -1,8 +1,18 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
-
 import discord
+
+from butler.design import (
+    ROOM_LINK_PERMISSION_DENIED_MESSAGE,
+    ROOM_LINK_PERMISSION_DENIED_ROLE_TEMPLATE,
+    SELECT_EVENT_PERMISSION_DENIED_MESSAGE,
+    SELECT_EVENT_PERMISSION_DENIED_ROLE_TEMPLATE,
+)
+from butler.domains.permissions.domain import can_manage_events as can_manage_events
+from butler.domains.permissions.domain import format_permissions as format_permissions
+from butler.domains.permissions.domain import (
+    permission_denied_message as permission_denied_message,
+)
 
 
 def guild_sync_access_message(guild_id: int) -> str:
@@ -12,28 +22,6 @@ def guild_sync_access_message(guild_id: int) -> str:
         "OAuth scopes `bot` and `applications.commands`, and the bot role can at least "
         "`View Channels` and `Use Application Commands`."
     )
-
-
-def format_permissions(permission_names: Sequence[str]) -> str:
-    return ", ".join(f"`{name}`" for name in permission_names)
-
-
-def can_manage_events(
-    *,
-    has_manage_guild: bool,
-    member_role_ids: set[int],
-    event_manager_role_id: int | None,
-) -> bool:
-    """Whether a member may create events and open/close rooms.
-
-    Pure core: `Manage Server` always grants it; otherwise the member must hold the
-    configured event-manager role (when one is configured at all).
-    """
-    if has_manage_guild:
-        return True
-    if event_manager_role_id is None:
-        return False
-    return event_manager_role_id in member_role_ids
 
 
 def member_can_manage_events(
@@ -49,19 +37,51 @@ def member_can_manage_events(
     )
 
 
-def permission_denied_message(
+def can_manage_room_action(
+    interaction: discord.Interaction,
     *,
-    role_mention: str | None,
-    without_role: str,
-    with_role_template: str,
-) -> str:
-    """Pure: mention the configured role if one resolved, otherwise the generic message.
+    event_manager_role_id: int | None,
+) -> bool:
+    user = interaction.user
+    if not isinstance(user, discord.Member):
+        return False
+    return member_can_manage_events(user, event_manager_role_id=event_manager_role_id)
 
-    `with_role_template` must contain a `{mention}` placeholder.
-    """
-    if role_mention is None:
-        return without_role
-    return with_role_template.format(mention=role_mention)
+
+def room_permission_denied_message(
+    interaction: discord.Interaction,
+    *,
+    event_manager_role_id: int | None,
+) -> str:
+    guild = interaction.guild
+    role = (
+        guild.get_role(event_manager_role_id)
+        if guild is not None and event_manager_role_id is not None
+        else None
+    )
+    return permission_denied_message(
+        role_mention=role.mention if role is not None else None,
+        without_role=ROOM_LINK_PERMISSION_DENIED_MESSAGE,
+        with_role_template=ROOM_LINK_PERMISSION_DENIED_ROLE_TEMPLATE,
+    )
+
+
+def select_event_permission_denied_message(
+    interaction: discord.Interaction,
+    *,
+    event_manager_role_id: int | None,
+) -> str:
+    guild = interaction.guild
+    role = (
+        guild.get_role(event_manager_role_id)
+        if guild is not None and event_manager_role_id is not None
+        else None
+    )
+    return permission_denied_message(
+        role_mention=role.mention if role is not None else None,
+        without_role=SELECT_EVENT_PERMISSION_DENIED_MESSAGE,
+        with_role_template=SELECT_EVENT_PERMISSION_DENIED_ROLE_TEMPLATE,
+    )
 
 
 def get_missing_event_permissions(*, bot_member: discord.Member) -> list[str]:

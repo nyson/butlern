@@ -5,8 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, cast
 
-from butler.rsvp.rsvp_domain import RsvpResponse
-from butler.rsvp.types import RoomState, RsvpRole, RsvpStatus, ViewState
+from butler.base import Store
+from butler.domains.rsvp.domain import RsvpResponse
+from butler.domains.rsvp.types import RoomState, RsvpRole, RsvpStatus, ViewState
 
 SCHEMA_SQL: Final[str] = """
 CREATE TABLE IF NOT EXISTS rsvp_message (
@@ -21,7 +22,8 @@ CREATE TABLE IF NOT EXISTS rsvp_message (
     room_state TEXT NOT NULL,
     room_url TEXT NULL,
     edition_image_url TEXT NULL,
-    event_description TEXT NOT NULL
+    event_description TEXT NOT NULL,
+    event_card_message_id INTEGER NULL
 );
 
 CREATE TABLE IF NOT EXISTS rsvp_response (
@@ -45,7 +47,7 @@ class StoredRsvpMessage:
 
 
 @dataclass(frozen=True)
-class RsvpMessageStore:
+class RsvpMessageStore(Store):
     path: Path
 
     @classmethod
@@ -76,9 +78,10 @@ class RsvpMessageStore:
                 room_state,
                 room_url,
                 edition_image_url,
-                event_description
+                event_description,
+                event_card_message_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(message_id)
             DO UPDATE SET
                 channel_id = excluded.channel_id,
@@ -91,7 +94,8 @@ class RsvpMessageStore:
                 room_state = excluded.room_state,
                 room_url = excluded.room_url,
                 edition_image_url = excluded.edition_image_url,
-                event_description = excluded.event_description
+                event_description = excluded.event_description,
+                event_card_message_id = excluded.event_card_message_id
             """,
             (
                 message_id,
@@ -106,6 +110,7 @@ class RsvpMessageStore:
                 view_state.room_url,
                 view_state.edition_image_url,
                 view_state.event_description,
+                view_state.event_card_message_id,
             ),
         )
 
@@ -126,7 +131,8 @@ class RsvpMessageStore:
                         room_state,
                         room_url,
                         edition_image_url,
-                        event_description
+                        event_description,
+                        event_card_message_id
                     FROM rsvp_message
                     WHERE message_id = ?
                     """,
@@ -155,7 +161,8 @@ class RsvpMessageStore:
                         room_state,
                         room_url,
                         edition_image_url,
-                        event_description
+                        event_description,
+                        event_card_message_id
                     FROM rsvp_message
                     ORDER BY message_id
                     """
@@ -177,7 +184,8 @@ class RsvpMessageStore:
                 room_state = ?,
                 room_url = ?,
                 edition_image_url = ?,
-                event_description = ?
+                event_description = ?,
+                event_card_message_id = ?
             WHERE message_id = ?
             """,
             (
@@ -190,6 +198,7 @@ class RsvpMessageStore:
                 view_state.room_url,
                 view_state.edition_image_url,
                 view_state.event_description,
+                view_state.event_card_message_id,
                 message_id,
             ),
         )
@@ -318,6 +327,7 @@ class RsvpMessageStore:
                     "room_url",
                     "edition_image_url",
                     "event_description",
+                    "event_card_message_id",
                 }
                 response_columns = self._table_columns(connection, "rsvp_response")
                 required_response_columns = {
@@ -357,6 +367,12 @@ class RsvpMessageStore:
         channel_id = self._required_int(values[1], "channel_id")
         guild_id = self._required_int(values[2], "guild_id")
         room_state = cast(RoomState, str(values[8]))
+        card_raw = values[12] if len(values) > 12 else None
+        event_card_message_id = (
+            self._required_int(card_raw, "event_card_message_id")
+            if card_raw is not None
+            else None
+        )
         view_state = ViewState(
             event_name=str(values[3]),
             start_unix=self._required_int(values[4], "start_unix"),
@@ -367,6 +383,7 @@ class RsvpMessageStore:
             room_url=self._optional_str(values[9]),
             edition_image_url=self._optional_str(values[10]),
             event_description=str(values[11]),
+            event_card_message_id=event_card_message_id,
         )
         return StoredRsvpMessage(
             message_id=message_id,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 from zoneinfo import ZoneInfo
 
-from butler.rsvp.event_command import (
+from butler.caches.events.recurrence import (
     occurrence_start_utc_for_local_date,
 )
 

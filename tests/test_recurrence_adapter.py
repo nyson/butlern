@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import discord
 import pytest
 
-from butler.rsvp.recurrence_adapter import (
+from butler.caches.events.recurrence_adapter import (
     fetch_recurrence_rules_for_guild,
     normalize_recurrence_rule_payload,
     recurrence_rules_from_raw_scheduled_events,

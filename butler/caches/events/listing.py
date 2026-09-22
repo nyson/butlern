@@ -22,16 +22,26 @@ async def list_scheduled_events_once(
 ) -> tuple[list[discord.ScheduledEvent], dict[int, RecurrenceRulePayload]]:
     """Prefer one HTTP list call for events + recurrence; fall back to typed fetch."""
     try:
-        async with stopwatch("list_scheduled_events_http", guild_id=guild.id):
+        async with stopwatch() as elapsed:
             raw_events = await fetch_raw_scheduled_events(guild)
+            result: tuple[list[discord.ScheduledEvent], dict[int, RecurrenceRulePayload]] | None
             if raw_events:
                 # discord.py connection state is needed to rebuild typed models.
-                state = guild._state
+                state = guild._state  # pyright: ignore[reportPrivateUsage]
                 events = [
                     discord.ScheduledEvent(state=state, data=raw_event)  # type: ignore[arg-type]
                     for raw_event in raw_events
                 ]
-                return events, recurrence_rules_from_raw_scheduled_events(raw_events)
+                result = (events, recurrence_rules_from_raw_scheduled_events(raw_events))
+            else:
+                result = None
+        logger.info(
+            "list_scheduled_events_http guild=%s took %.1fms",
+            guild.id,
+            elapsed.ms,
+        )
+        if result is not None:
+            return result
     except (discord.Forbidden, discord.HTTPException, AttributeError, TypeError, ValueError):
         logger.warning(
             "list_scheduled_events_http failed guild=%s", guild.id, exc_info=True
@@ -39,8 +49,13 @@ async def list_scheduled_events_once(
 
     # Tests / degraded clients: single typed fetch, no second recurrence HTTP.
     try:
-        async with stopwatch("fetch_scheduled_events", guild_id=guild.id):
+        async with stopwatch() as elapsed:
             events = await guild.fetch_scheduled_events(with_counts=False)
+        logger.info(
+            "fetch_scheduled_events guild=%s took %.1fms",
+            guild.id,
+            elapsed.ms,
+        )
     except (discord.Forbidden, discord.HTTPException):
         logger.warning(
             "fetch_scheduled_events failed guild=%s", guild.id, exc_info=True
@@ -94,10 +109,14 @@ async def fetch_scheduled_event_by_id(
     if cached is not None:
         return cached
     try:
-        async with stopwatch(
-            f"fetch_scheduled_event id={event_id}",
-            guild_id=guild.id,
-        ):
-            return await guild.fetch_scheduled_event(event_id, with_counts=False)
+        async with stopwatch() as elapsed:
+            event = await guild.fetch_scheduled_event(event_id, with_counts=False)
+        logger.info(
+            "fetch_scheduled_event id=%s guild=%s took %.1fms",
+            event_id,
+            guild.id,
+            elapsed.ms,
+        )
+        return event
     except (discord.NotFound, discord.Forbidden, discord.HTTPException):
         return None

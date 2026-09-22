@@ -14,6 +14,9 @@ AUTOCOMPLETE_EVENT_CACHE_AT: dict[int, float] = {}
 
 
 def reset_connected_event_cache() -> None:
+    from butler.caches.events.warmup import cancel_pending_event_cache_retries
+
+    cancel_pending_event_cache_retries()
     CONNECTED_EVENT_CACHE.clear()
     AUTOCOMPLETE_EVENT_CACHE.clear()
     AUTOCOMPLETE_EVENT_CACHE_AT.clear()

@@ -86,27 +86,43 @@ async def _sync_to_guild(
 
 
 async def _sync_commands_on_startup(*, deps: BotEventDependencies) -> None:
+    runtime_bot = deps.get_runtime_bot_fn()
+
     if deps.is_force_guild_sync_fn():
         if deps.config.guild_id is None:
             raise RuntimeError(
                 "butler-dev requires DISCORD_GUILD_ID in .env or the environment."
             )
         await _sync_to_guild(
-            runtime_bot=deps.get_runtime_bot_fn(),
+            runtime_bot=runtime_bot,
             guild_id=deps.config.guild_id,
             strict=True,
         )
         logger.info("Forced dev mode command sync is active.")
         return
 
+    # Guild sync is immediate; global can take up to ~1h. Prefer every connected
+    # guild so multi-server deploys don't leave non-DISCORD_GUILD_ID servers on
+    # the previous command tree until global propagation finishes.
+    guild_ids: list[int] = []
+    seen: set[int] = set()
     if deps.config.guild_id is not None:
+        guild_ids.append(deps.config.guild_id)
+        seen.add(deps.config.guild_id)
+    for guild in runtime_bot.guilds:
+        if guild.id in seen:
+            continue
+        guild_ids.append(guild.id)
+        seen.add(guild.id)
+
+    for guild_id in guild_ids:
         await _sync_to_guild(
-            runtime_bot=deps.get_runtime_bot_fn(),
-            guild_id=deps.config.guild_id,
+            runtime_bot=runtime_bot,
+            guild_id=guild_id,
             strict=False,
         )
 
-    await deps.get_runtime_bot_fn().tree.sync()
+    await runtime_bot.tree.sync()
     logger.info("Synced global commands.")
 
 
@@ -129,17 +145,32 @@ async def _handle_on_ready(
         controller=deps.get_controller_fn(),
     )
 
+    # Prefer warming the event cache before slash sync so autocomplete is hot,
+    # but never let cache failures block command registration.
     if not state.event_cache_boot_hydrated:
         logger.info("Boot scheduled-event cache hydrate starting.")
-        await warmup_connected_event_cache(guilds=list(runtime_bot.guilds), force=True)
-        state.event_cache_boot_hydrated = True
-        logger.info("Boot scheduled-event cache hydrate finished.")
+        try:
+            await warmup_connected_event_cache(
+                guilds=list(runtime_bot.guilds),
+                force=True,
+            )
+            state.event_cache_boot_hydrated = True
+            logger.info("Boot scheduled-event cache hydrate finished.")
+        except Exception:
+            logger.exception(
+                "Boot scheduled-event cache hydrate failed; continuing with slash sync."
+            )
 
     if not state.commands_synced:
-        logger.info("Event cache warm; registering slash commands.")
-        await _sync_commands_on_startup(deps=deps)
-        state.commands_synced = True
-        logger.info("Slash command registration complete.")
+        logger.info("Registering slash commands.")
+        try:
+            await _sync_commands_on_startup(deps=deps)
+            state.commands_synced = True
+            logger.info("Slash command registration complete.")
+        except Exception:
+            # Leave commands_synced False so a later on_ready reconnect can retry.
+            logger.exception("Slash command registration failed; will retry on next ready.")
+            raise
 
     if not state.event_cache_daily_sync_started and not daily_event_cache_sync.is_running():
         daily_event_cache_sync.start()
@@ -252,15 +283,13 @@ def register_bot_events(
         before: discord.ScheduledEvent,
         after: discord.ScheduledEvent,
     ) -> None:
-        before_status = before.status.name if before.status is not None else None
-        after_status = after.status.name if after.status is not None else None
         logger.info(
             "Gateway GUILD_SCHEDULED_EVENT_UPDATE event_id=%s name=%r "
             "status=%s->%s",
             after.id,
             after.name,
-            before_status,
-            after_status,
+            before.status.name,
+            after.status.name,
         )
         handle_gateway_scheduled_event_upsert(after, action="update")
 

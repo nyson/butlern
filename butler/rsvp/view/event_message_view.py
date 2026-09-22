@@ -11,7 +11,12 @@ from discord import ui
 if TYPE_CHECKING:
     from discord.ext import commands
 
-from butler.caches.events import AUTOCOMPLETE_EVENT_CACHE, resolve_existing_event_for_command
+from butler.caches.events import (
+    AUTOCOMPLETE_EVENT_CACHE,
+    event_option_cache_is_fresh,
+    resolve_existing_event_for_command,
+    schedule_event_cache_retry,
+)
 from butler.design import (
     ARRIVE_LATER_BUTTON_LABEL,
     ARRIVE_LATER_EMOJI,
@@ -604,6 +609,8 @@ class EventMessageView(ui.LayoutView):
             return
 
         self._ensure_message_context(interaction)
+        if not event_option_cache_is_fresh(guild_id=guild.id):
+            schedule_event_cache_retry(guild=guild)
         cached = list(AUTOCOMPLETE_EVENT_CACHE.get(guild.id, []))
         options = build_event_select_options(choices=cached, include_create_new=False)
         if not options:

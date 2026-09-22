@@ -1,26 +1,24 @@
 from __future__ import annotations
 
-import logging
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 
-logger = logging.getLogger(__name__)
+
+@dataclass
+class Elapsed:
+    """Mutable wall-time result filled when the ``stopwatch`` context exits."""
+
+    ms: float = 0.0
 
 
 @asynccontextmanager
-async def stopwatch(
-    label: str,
-    *,
-    guild_id: int | None = None,
-) -> AsyncIterator[None]:
-    """Log wall time for an async section."""
+async def stopwatch() -> AsyncGenerator[Elapsed]:
+    """Measure wall time for an async section; caller owns any logging."""
     started = time.perf_counter()
+    elapsed = Elapsed()
     try:
-        yield
+        yield elapsed
     finally:
-        elapsed_ms = (time.perf_counter() - started) * 1000.0
-        if guild_id is None:
-            logger.info("%s took %.1fms", label, elapsed_ms)
-        else:
-            logger.info("%s guild=%s took %.1fms", label, guild_id, elapsed_ms)
+        elapsed.ms = (time.perf_counter() - started) * 1000.0

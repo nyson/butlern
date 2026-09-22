@@ -47,7 +47,12 @@ from butler.caches.events.reusability import (
     is_reusable_scheduled_event,
 )
 from butler.caches.events.urls import build_event_url, build_preview_event_url
-from butler.caches.events.warmup import warmup_connected_event_cache
+from butler.caches.events.warmup import (
+    cancel_pending_event_cache_retries,
+    event_cache_retry_pending,
+    schedule_event_cache_retry,
+    warmup_connected_event_cache,
+)
 
 __all__ = [
     "AUTOCOMPLETE_EVENT_CACHE",
@@ -59,8 +64,10 @@ __all__ = [
     "cache_connected_event_id",
     "cache_reusable_events_for_guild",
     "cached_connected_event_id",
+    "cancel_pending_event_cache_retries",
     "clear_connected_event_id",
     "drop_cached_event_option",
+    "event_cache_retry_pending",
     "event_choice_name",
     "event_option_cache_is_fresh",
     "event_sort_key",
@@ -77,6 +84,7 @@ __all__ = [
     "resolve_existing_event_for_command",
     "resolve_selected_existing_event",
     "reusable_scheduled_events_for_guild",
+    "schedule_event_cache_retry",
     "upsert_cached_event_option",
     "warmup_connected_event_cache",
 ]

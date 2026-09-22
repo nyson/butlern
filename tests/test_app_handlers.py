@@ -549,6 +549,103 @@ async def test_on_ready_warms_cache_before_command_sync(
         app._BOT_EVENT_STATE.commands_synced = False
 
 
+async def test_on_ready_syncs_commands_even_if_cache_warmup_fails(
+    store: MagicMock,
+    views: dict[int, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _ = store
+    _ = views
+    hydrate = AsyncMock(return_value=True)
+    monkeypatch.setattr(rsvp_runtime, "hydrate_persistent_views", hydrate)
+    sync_calls: list[str] = []
+
+    async def _failing_warmup(*, guilds: list[object], force: bool = False) -> None:
+        _ = guilds, force
+        raise RuntimeError("warmup exploded")
+
+    async def _fake_sync(*, deps: object) -> None:
+        _ = deps
+        sync_calls.append("synced")
+
+    monkeypatch.setattr(bot_events, "warmup_connected_event_cache", _failing_warmup)
+    monkeypatch.setattr(bot_events, "_sync_commands_on_startup", _fake_sync)
+
+    bot = MagicMock()
+    bot.user = MagicMock()
+    bot.user.id = 1
+    bot.wait_until_ready = AsyncMock()
+    bot.tree = MagicMock()
+    bot.guilds = [make_guild(guild_id=1, scheduled_events=[])]
+    monkeypatch.setattr(app, "bot", bot)
+
+    app._BOT_EVENT_STATE.rsvp_views_hydrated = False
+    app._BOT_EVENT_STATE.event_cache_boot_hydrated = False
+    app._BOT_EVENT_STATE.commands_synced = False
+    app._BOT_EVENT_STATE.event_cache_daily_sync_started = False
+    daily_sync = app._REGISTERED_BOT_EVENTS.daily_event_cache_sync
+    if daily_sync.is_running():
+        daily_sync.cancel()
+    try:
+        await app.on_ready()
+        assert sync_calls == ["synced"]
+        assert app._BOT_EVENT_STATE.event_cache_boot_hydrated is False
+        assert app._BOT_EVENT_STATE.commands_synced is True
+        assert app._BOT_EVENT_STATE.event_cache_daily_sync_started is True
+    finally:
+        if daily_sync.is_running():
+            daily_sync.cancel()
+        app._BOT_EVENT_STATE.event_cache_daily_sync_started = False
+        app._BOT_EVENT_STATE.event_cache_boot_hydrated = False
+        app._BOT_EVENT_STATE.commands_synced = False
+
+
+async def test_sync_commands_on_startup_guild_syncs_all_connected_guilds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    synced_guilds: list[int] = []
+    global_syncs = 0
+
+    async def _fake_sync_to_guild(
+        *,
+        runtime_bot: object,
+        guild_id: int,
+        strict: bool,
+    ) -> None:
+        _ = runtime_bot, strict
+        synced_guilds.append(guild_id)
+
+    async def _fake_global_sync() -> None:
+        nonlocal global_syncs
+        global_syncs += 1
+
+    bot = MagicMock()
+    bot.guilds = [
+        make_guild(guild_id=111),
+        make_guild(guild_id=222),
+    ]
+    bot.tree.sync = AsyncMock(side_effect=_fake_global_sync)
+
+    monkeypatch.setattr(bot_events, "_sync_to_guild", _fake_sync_to_guild)
+
+    deps = bot_events.BotEventDependencies(
+        get_runtime_bot_fn=lambda: bot,
+        config=cast(Any, MagicMock(guild_id=222)),
+        is_force_guild_sync_fn=lambda: False,
+        get_active_views_fn=lambda: {},
+        get_settings_store_fn=lambda: MagicMock(),
+        get_view_store_fn=lambda: MagicMock(),
+        get_controller_fn=lambda: MagicMock(),
+        get_bot_member_fn=lambda guild, user: None,
+        find_onboarding_channel_fn=lambda guild, member: None,
+        onboarding_message="hi",
+    )
+    await bot_events._sync_commands_on_startup(deps=deps)
+
+    assert synced_guilds == [222, 111]
+    assert global_syncs == 1
+
+
 # --- hydrate / resolve ------------------------------------------------------
 
 

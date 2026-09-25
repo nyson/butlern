@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 
 import discord
+import pytest
 
 from butler.caches import events as events_cache
 from butler.caches.events.option_cache import AUTOCOMPLETE_EVENT_CACHE, upsert_cached_event_option
@@ -57,3 +58,18 @@ def test_gateway_update_drops_completed_event() -> None:
 
     options = AUTOCOMPLETE_EVENT_CACHE.get(3, [])
     assert all(value != "12" for _name, value in options)
+
+
+def test_gateway_upsert_rescues_handler_exceptions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A broken payload must not raise out of the gateway entrypoint."""
+    from butler.caches.events import gateway as event_gateway
+
+    event = _event_with_guild(event_id=13, guild_id=4, name="Broken")
+
+    def _boom(_event: discord.ScheduledEvent) -> int:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(event_gateway, "guild_id_from_scheduled_event", _boom)
+    event_gateway.handle_gateway_scheduled_event_upsert(event, action="update")

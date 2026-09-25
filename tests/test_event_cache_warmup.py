@@ -50,6 +50,10 @@ async def test_warm_guild_failure_leaves_cache_cold_and_isolates_siblings(
     assert 1 not in AUTOCOMPLETE_EVENT_CACHE_AT
     assert event_option_cache_is_fresh(guild_id=2) is True
     assert AUTOCOMPLETE_EVENT_CACHE.get(2) == []
+    # Failed guild gets a delayed retry without waiting for autocomplete.
+    assert events_cache.event_cache_retry_pending(guild_id=1) is True
+    assert events_cache.event_cache_retry_pending(guild_id=2) is False
+    events_cache.cancel_pending_event_cache_retries()
 
 
 async def test_cold_autocomplete_schedules_retry_and_degrades(

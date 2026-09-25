@@ -103,15 +103,19 @@ async def fetch_raw_scheduled_events(guild: discord.Guild) -> list[Mapping[str, 
 
     Uses discord.py's private HTTP client because the public typed API does not
     expose recurrence fields. Callers should treat this as the single private
-adapter for that limitation.
+    adapter for that limitation.
+
+    Raises Discord HTTP and transient network errors for the caller to handle
+    (listing falls back to the typed public API). Missing private HTTP surfaces
+    (tests/degraded clients) return an empty list.
     """
     try:
         # Private connection/http surface — intentional adapter boundary.
         http = guild._state.http
-        raw_events = await http.get_scheduled_events(guild.id, with_user_count=False)
     except AttributeError:
         return []
 
+    raw_events = await http.get_scheduled_events(guild.id, with_user_count=False)
     return [
         cast(Mapping[str, object], event)
         for event in raw_events  # pyright: ignore[reportUnknownVariableType]
@@ -125,6 +129,6 @@ async def fetch_recurrence_rules_for_guild(
 ) -> dict[int, RecurrenceRulePayload]:
     try:
         raw_events = await fetch_raw_scheduled_events(guild)
-    except (discord.Forbidden, HTTPException):
+    except (discord.Forbidden, HTTPException, OSError, TimeoutError, AttributeError):
         return {}
     return recurrence_rules_from_raw_scheduled_events(raw_events)

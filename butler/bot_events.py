@@ -179,7 +179,13 @@ async def _handle_on_ready(
 
 async def _handle_on_guild_join(*, deps: BotEventDependencies, guild: discord.Guild) -> None:
     runtime_bot = deps.get_runtime_bot_fn()
-    await warmup_connected_event_cache(guilds=[guild], force=True)
+    try:
+        await warmup_connected_event_cache(guilds=[guild], force=True)
+    except Exception:
+        logger.exception(
+            "Event cache warmup failed on guild join guild=%s; continuing onboarding.",
+            guild.id,
+        )
 
     bot_member = deps.get_bot_member_fn(guild, runtime_bot.user)
     if bot_member is None:
@@ -236,11 +242,16 @@ def register_bot_events(
     async def _run_daily_event_cache_sync() -> None:
         runtime_bot = deps.get_runtime_bot_fn()
         logger.info("Daily scheduled-event cache resync starting.")
-        await warmup_connected_event_cache(
-            guilds=list(runtime_bot.guilds),
-            force=True,
-        )
-        logger.info("Daily scheduled-event cache resync finished.")
+        try:
+            await warmup_connected_event_cache(
+                guilds=list(runtime_bot.guilds),
+                force=True,
+            )
+            logger.info("Daily scheduled-event cache resync finished.")
+        except Exception:
+            # Interval loop must keep running; per-guild failures are already
+            # isolated inside warmup, but guard the job entrypoint too.
+            logger.exception("Daily scheduled-event cache resync failed.")
 
     daily_event_cache_sync = create_interval_job(
         name="daily-event-cache-sync",

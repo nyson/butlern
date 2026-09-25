@@ -48,6 +48,21 @@ def handle_gateway_scheduled_event_upsert(
     action: Literal["create", "update"] = "update",
 ) -> None:
     """Apply create/update from Discord gateway without listing the guild."""
+    try:
+        _handle_gateway_scheduled_event_upsert(event, action=action)
+    except Exception:
+        logger.exception(
+            "Gateway scheduled_event.%s handler failed event_id=%s",
+            action,
+            getattr(event, "id", None),
+        )
+
+
+def _handle_gateway_scheduled_event_upsert(
+    event: discord.ScheduledEvent,
+    *,
+    action: Literal["create", "update"],
+) -> None:
     guild_id = guild_id_from_scheduled_event(event)
     was_cached = any(
         value == str(event.id)
@@ -107,6 +122,16 @@ def handle_gateway_scheduled_event_upsert(
 
 def handle_gateway_scheduled_event_delete(event: discord.ScheduledEvent) -> None:
     """Apply delete from Discord gateway without listing the guild."""
+    try:
+        _handle_gateway_scheduled_event_delete(event)
+    except Exception:
+        logger.exception(
+            "Gateway scheduled_event.delete handler failed event_id=%s",
+            getattr(event, "id", None),
+        )
+
+
+def _handle_gateway_scheduled_event_delete(event: discord.ScheduledEvent) -> None:
     guild_id = guild_id_from_scheduled_event(event)
     was_cached = any(
         value == str(event.id)

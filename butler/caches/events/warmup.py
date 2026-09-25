@@ -133,6 +133,9 @@ async def _warm_guild(*, guild: Guild, force: bool) -> WarmOutcome:
             # Keep the guild cold/unclean rather than publishing a partial stamp.
             invalidate_event_option_cache(guild_id=guild.id)
             logger.exception("Event cache warmup failed guild=%s", guild.id)
+            # Proactively retry after the delay so boot/daily failures recover
+            # without waiting for a cold autocomplete hit.
+            schedule_event_cache_retry(guild=guild)
             return "failed"
 
         if not candidates:

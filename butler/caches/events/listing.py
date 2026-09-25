@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+from collections.abc import Mapping, Sequence
+from typing import Any, cast
 
 import discord
 
@@ -15,6 +17,51 @@ from butler.timing import stopwatch
 
 logger = logging.getLogger(__name__)
 
+# Network blips (DNS/connect/timeouts) often surface as OSError/TimeoutError from
+# aiohttp rather than discord.HTTPException. KeyError/TypeError/ValueError cover
+# malformed raw payloads when hydrating discord.ScheduledEvent models.
+_SCHEDULED_EVENT_LIST_ERRORS: tuple[type[BaseException], ...] = (
+    discord.Forbidden,
+    discord.HTTPException,
+    OSError,
+    TimeoutError,
+    AttributeError,
+    TypeError,
+    ValueError,
+    KeyError,
+)
+_SCHEDULED_EVENT_FETCH_ERRORS: tuple[type[BaseException], ...] = (
+    discord.NotFound,
+    discord.Forbidden,
+    discord.HTTPException,
+    OSError,
+    TimeoutError,
+)
+
+
+def _hydrate_scheduled_events_from_raw(
+    *,
+    guild: discord.Guild,
+    raw_events: Sequence[Mapping[str, object]],
+) -> list[discord.ScheduledEvent]:
+    """Build typed events from raw payloads; skip individual bad rows."""
+    # discord.py connection state is needed to rebuild typed models.
+    state = guild._state  # pyright: ignore[reportPrivateUsage]
+    events: list[discord.ScheduledEvent] = []
+    for raw_event in raw_events:
+        try:
+            events.append(
+                discord.ScheduledEvent(state=state, data=cast(Any, raw_event))
+            )
+        except (AttributeError, KeyError, TypeError, ValueError):
+            logger.warning(
+                "Skipping malformed scheduled-event payload guild=%s payload_id=%r",
+                guild.id,
+                raw_event.get("id"),
+                exc_info=True,
+            )
+    return events
+
 
 async def list_scheduled_events_once(
     *,
@@ -26,13 +73,18 @@ async def list_scheduled_events_once(
             raw_events = await fetch_raw_scheduled_events(guild)
             result: tuple[list[discord.ScheduledEvent], dict[int, RecurrenceRulePayload]] | None
             if raw_events:
-                # discord.py connection state is needed to rebuild typed models.
-                state = guild._state  # pyright: ignore[reportPrivateUsage]
-                events = [
-                    discord.ScheduledEvent(state=state, data=raw_event)  # type: ignore[arg-type]
-                    for raw_event in raw_events
-                ]
-                result = (events, recurrence_rules_from_raw_scheduled_events(raw_events))
+                events = _hydrate_scheduled_events_from_raw(
+                    guild=guild,
+                    raw_events=raw_events,
+                )
+                if events:
+                    result = (
+                        events,
+                        recurrence_rules_from_raw_scheduled_events(raw_events),
+                    )
+                else:
+                    # Every payload failed to hydrate — try the public typed API.
+                    result = None
             else:
                 result = None
         logger.info(
@@ -42,7 +94,7 @@ async def list_scheduled_events_once(
         )
         if result is not None:
             return result
-    except (discord.Forbidden, discord.HTTPException, AttributeError, TypeError, ValueError):
+    except _SCHEDULED_EVENT_LIST_ERRORS:
         logger.warning(
             "list_scheduled_events_http failed guild=%s", guild.id, exc_info=True
         )
@@ -56,7 +108,7 @@ async def list_scheduled_events_once(
             guild.id,
             elapsed.ms,
         )
-    except (discord.Forbidden, discord.HTTPException):
+    except _SCHEDULED_EVENT_LIST_ERRORS:
         logger.warning(
             "fetch_scheduled_events failed guild=%s", guild.id, exc_info=True
         )
@@ -68,7 +120,16 @@ async def reusable_scheduled_events_for_guild(
     *,
     guild: discord.Guild,
 ) -> list[discord.ScheduledEvent]:
-    events, recurrence_rules = await list_scheduled_events_once(guild=guild)
+    try:
+        events, recurrence_rules = await list_scheduled_events_once(guild=guild)
+    except Exception:
+        # Last-resort rescue so callers (warmup/resolve) never crash the bot loop.
+        logger.exception(
+            "list_scheduled_events_once raised unexpectedly guild=%s; using gateway cache",
+            guild.id,
+        )
+        events, recurrence_rules = [], {}
+
     if not events:
         gateway_events = list(guild.scheduled_events)
         if gateway_events:
@@ -118,5 +179,5 @@ async def fetch_scheduled_event_by_id(
             elapsed.ms,
         )
         return event
-    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+    except _SCHEDULED_EVENT_FETCH_ERRORS:
         return None

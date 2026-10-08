@@ -82,7 +82,7 @@ async def resolve_edition_media(
     may fall back to ``custom``.
     """
     if edition is None:
-        logger.info(
+        logger.debug(
             "resolve_edition_media guild_id=%s edition=None -> no media",
             guild.id,
         )
@@ -118,7 +118,7 @@ async def resolve_edition_media(
         if used_fallback:
             matched_via = "custom"
     if emoji is None:
-        logger.info(
+        logger.debug(
             "resolve_edition_media guild_id=%s edition=%r resource_id=%r "
             "source=%s emoji_count=%s candidates=%s emoji_names=%s "
             "match=None fallback=False",
@@ -134,7 +134,7 @@ async def resolve_edition_media(
 
     rendered = str(emoji)
     image_url = str(emoji.url)
-    logger.info(
+    logger.debug(
         "resolve_edition_media guild_id=%s edition=%r resource_id=%r "
         "source=%s emoji_count=%s matched_name=%r matched_via=%r matched_id=%s "
         "fallback_to_custom=%s rendered=%r image_url=%r emoji_names=%s",

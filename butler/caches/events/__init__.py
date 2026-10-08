@@ -48,6 +48,7 @@ from butler.caches.events.reusability import (
 )
 from butler.caches.events.urls import build_event_url, build_preview_event_url
 from butler.caches.events.warmup import (
+    EventCacheWarmResult,
     cancel_pending_event_cache_retries,
     event_cache_retry_pending,
     schedule_event_cache_retry,
@@ -56,6 +57,7 @@ from butler.caches.events.warmup import (
 
 __all__ = [
     "AUTOCOMPLETE_EVENT_CACHE",
+    "EventCacheWarmResult",
     "ExistingEventResolution",
     "autocomplete_existing_event",
     "autocomplete_existing_or_create_event",

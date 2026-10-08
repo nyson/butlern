@@ -89,7 +89,7 @@ def _handle_gateway_scheduled_event_upsert(
 
     if reusable:
         upsert_cached_event_option(guild_id=guild_id, event=event)
-        logger.info(
+        logger.debug(
             "Event cache %s guild=%s event_id=%s name=%r (options=%s)",
             "updated" if was_cached else "added",
             guild_id,
@@ -102,13 +102,13 @@ def _handle_gateway_scheduled_event_upsert(
     drop_cached_event_option(guild_id=guild_id, event_id=event.id)
     if cached_connected_event_id(guild_id=guild_id) == event.id:
         clear_connected_event_id(guild_id=guild_id)
-        logger.info(
+        logger.debug(
             "Event cache cleared connected event guild=%s event_id=%s",
             guild_id,
             event.id,
         )
     touch_cache_ttl(guild_id=guild_id)
-    logger.info(
+    logger.debug(
         "Event cache removed non-reusable guild=%s event_id=%s name=%r status=%s "
         "was_cached=%s options=%s",
         guild_id,
@@ -151,13 +151,13 @@ def _handle_gateway_scheduled_event_delete(event: discord.ScheduledEvent) -> Non
     drop_cached_event_option(guild_id=guild_id, event_id=event.id)
     if cached_connected_event_id(guild_id=guild_id) == event.id:
         clear_connected_event_id(guild_id=guild_id)
-        logger.info(
+        logger.debug(
             "Event cache cleared connected event guild=%s event_id=%s",
             guild_id,
             event.id,
         )
     touch_cache_ttl(guild_id=guild_id)
-    logger.info(
+    logger.debug(
         "Event cache removed deleted guild=%s event_id=%s was_cached=%s options=%s",
         guild_id,
         event.id,

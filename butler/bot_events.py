@@ -15,7 +15,11 @@ from butler.caches.events import (
 )
 from butler.config import DiscordConfig
 from butler.domains.rsvp.store import RsvpMessageStore
-from butler.jobs import IntervalJob, create_interval_job
+from butler.jobs.runtime import (
+    ButlerScheduler,
+    DailyEventCacheJobHandle,
+    set_runtime_scheduler,
+)
 from butler.permissions import guild_sync_access_message
 from butler.rsvp.controller import RsvpController
 from butler.rsvp.view.event_message_view import EventMessageView
@@ -60,7 +64,8 @@ class RegisteredBotEvents:
         Awaitable[None],
     ]
     setup_hook: Callable[[], Awaitable[None]]
-    daily_event_cache_sync: IntervalJob
+    daily_event_cache_sync: DailyEventCacheJobHandle
+    scheduler: ButlerScheduler
 
 
 async def _sync_to_guild(
@@ -80,9 +85,9 @@ async def _sync_to_guild(
         logger.warning(guidance)
         logger.warning("Falling back to global command sync.")
         await runtime_bot.tree.sync()
-        logger.info("Synced global commands.")
+        logger.debug("Synced global commands after missing guild access.")
         return
-    logger.info("Synced commands to guild %s.", guild_id)
+    logger.debug("Synced commands to guild %s.", guild_id)
 
 
 async def _sync_commands_on_startup(*, deps: BotEventDependencies) -> None:
@@ -98,7 +103,7 @@ async def _sync_commands_on_startup(*, deps: BotEventDependencies) -> None:
             guild_id=deps.config.guild_id,
             strict=True,
         )
-        logger.info("Forced dev mode command sync is active.")
+        logger.debug("Forced dev mode command sync is active.")
         return
 
     # Guild sync is immediate; global can take up to ~1h. Prefer every connected
@@ -123,19 +128,19 @@ async def _sync_commands_on_startup(*, deps: BotEventDependencies) -> None:
         )
 
     await runtime_bot.tree.sync()
-    logger.info("Synced global commands.")
+    logger.debug("Synced global commands.")
 
 
 async def _handle_on_ready(
     *,
     deps: BotEventDependencies,
     state: BotEventState,
-    daily_event_cache_sync: IntervalJob,
+    scheduler: ButlerScheduler,
+    daily_event_cache_sync: DailyEventCacheJobHandle,
 ) -> None:
     runtime_bot = deps.get_runtime_bot_fn()
-    if runtime_bot.user is not None:
-        logger.info("Logged in as %s (ID: %s)", runtime_bot.user, runtime_bot.user.id)
 
+    # RSVP hydrate is a boot job (store -> persistent views); keep before cache warm.
     state.rsvp_views_hydrated = await rsvp_runtime.hydrate_persistent_views(
         already_hydrated=state.rsvp_views_hydrated,
         active_views=deps.get_active_views_fn(),
@@ -148,33 +153,46 @@ async def _handle_on_ready(
     # Prefer warming the event cache before slash sync so autocomplete is hot,
     # but never let cache failures block command registration.
     if not state.event_cache_boot_hydrated:
-        logger.info("Boot scheduled-event cache hydrate starting.")
+        logger.debug("Boot scheduled-event cache hydrate starting.")
         try:
             await warmup_connected_event_cache(
                 guilds=list(runtime_bot.guilds),
                 force=True,
             )
             state.event_cache_boot_hydrated = True
-            logger.info("Boot scheduled-event cache hydrate finished.")
+            logger.debug("Boot scheduled-event cache hydrate finished.")
         except Exception:
             logger.exception(
                 "Boot scheduled-event cache hydrate failed; continuing with slash sync."
             )
 
     if not state.commands_synced:
-        logger.info("Registering slash commands.")
+        logger.debug("Registering slash commands.")
         try:
             await _sync_commands_on_startup(deps=deps)
             state.commands_synced = True
-            logger.info("Slash command registration complete.")
+            logger.debug("Slash command registration complete.")
         except Exception:
             # Leave commands_synced False so a later on_ready reconnect can retry.
             logger.exception("Slash command registration failed; will retry on next ready.")
             raise
 
-    if not state.event_cache_daily_sync_started and not daily_event_cache_sync.is_running():
+    if not state.event_cache_daily_sync_started:
         daily_event_cache_sync.start()
         state.event_cache_daily_sync_started = True
+        logger.debug("APScheduler event-cache jobs active running=%s", scheduler.running)
+
+    if runtime_bot.user is not None:
+        logger.info(
+            "Butler ready as %s (ID: %s); rsvp_hydrated=%s event_cache=%s "
+            "commands_synced=%s scheduler=%s",
+            runtime_bot.user,
+            runtime_bot.user.id,
+            state.rsvp_views_hydrated,
+            state.event_cache_boot_hydrated,
+            state.commands_synced,
+            scheduler.running,
+        )
 
 
 async def _handle_on_guild_join(*, deps: BotEventDependencies, guild: discord.Guild) -> None:
@@ -203,7 +221,7 @@ async def _handle_on_guild_join(*, deps: BotEventDependencies, guild: discord.Gu
 
 async def _handle_setup_hook(*, deps: BotEventDependencies) -> None:
     _ = deps
-    logger.info(
+    logger.debug(
         "setup_hook complete; slash commands will register after event-cache hydrate."
     )
 
@@ -239,35 +257,15 @@ def register_bot_events(
         onboarding_message=onboarding_message,
     )
 
-    async def _run_daily_event_cache_sync() -> None:
-        runtime_bot = deps.get_runtime_bot_fn()
-        logger.info("Daily scheduled-event cache resync starting.")
-        try:
-            await warmup_connected_event_cache(
-                guilds=list(runtime_bot.guilds),
-                force=True,
-            )
-            logger.info("Daily scheduled-event cache resync finished.")
-        except Exception:
-            # Interval loop must keep running; per-guild failures are already
-            # isolated inside warmup, but guard the job entrypoint too.
-            logger.exception("Daily scheduled-event cache resync failed.")
-
-    daily_event_cache_sync = create_interval_job(
-        name="daily-event-cache-sync",
-        get_bot=deps.get_runtime_bot_fn,
-        run=_run_daily_event_cache_sync,
-        hours=24,
-        skip_first_iteration=True,
-        first_iteration_log=(
-            "Skipping immediate daily event-cache sync (boot hydrate covers it)."
-        ),
-    )
+    scheduler = ButlerScheduler(get_bot=deps.get_runtime_bot_fn)
+    set_runtime_scheduler(scheduler)
+    daily_event_cache_sync = DailyEventCacheJobHandle(scheduler)
 
     async def on_ready() -> None:
         await _handle_on_ready(
             deps=deps,
             state=state,
+            scheduler=scheduler,
             daily_event_cache_sync=daily_event_cache_sync,
         )
 
@@ -322,4 +320,5 @@ def register_bot_events(
         on_scheduled_event_update=on_scheduled_event_update,
         setup_hook=setup_hook,
         daily_event_cache_sync=daily_event_cache_sync,
+        scheduler=scheduler,
     )

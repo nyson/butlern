@@ -99,8 +99,10 @@ Warmth model (preferred over blocking refresh inside interactions):
 - **Boot** (`on_ready`): `warmup_connected_event_cache(guilds=…, force=True)` **before** slash command sync so autocomplete is hot within Discord’s ~3s budget.
 - **Daily job**: `create_interval_job` every 24h, `force=True`, **skips the first tick** because boot already hydrated.
 - **Guild join**: force warm that guild once.
+- **Manual**: `/rehydrate` (`manage_guild`) force-warms **the current guild only** and reports `EventCacheWarmResult` counts (no deploy).
 - **Gateway** scheduled-event create/update/delete: patch the in-memory options without a full list.
 - **Autocomplete / modal options**: read the cache only. If cold, schedule a **background** warm and still return immediately (create-new + whatever is cached).
+- Multi-guild warm uses `EVENT_CACHE_WARM_GUILD_CONCURRENCY` via `warm_guild_concurrency_lock()` (shared semaphore) plus per-guild `warmup_lock_for`.
 
 Empty / missing cache is an explicit degraded result; the module decides UX (create-new only, ephemeral empty message, etc.).
 
@@ -108,12 +110,13 @@ Do **not** use open-ended reflection (`getattr` / probing private Discord intern
 
 ### Jobs
 
-Long-running interval work lives under **`butler/jobs/`**, not as one-off loops buried only in feature modules.
+Background scheduling uses **APScheduler** (`AsyncIOScheduler`) via `butler/jobs/runtime.py` (`ButlerScheduler`), started from `bot_events` on ready.
 
-- `create_interval_job(name=…, get_bot=…, run=…, hours|minutes|seconds=…, skip_first_iteration=…)` builds a `discord.ext.tasks` loop with `wait_until_ready` and optional skip of iteration 0.
-- `IntervalJob` exposes `start` / `stop` / `cancel` / `is_running` for lifecycle and tests.
-- First consumer: daily scheduled-event cache resync from `bot_events`.
-- Additional jobs should reuse this helper rather than copying loop boilerplate.
+- **Daily / freshness:** interval job `event-cache-daily-warm` force-warms all guilds on a period slightly under `EVENT_OPTION_CACHE_TTL_SECONDS` so the option cache does not go soft-stale; first fire is deferred because boot already warmed.
+- **Transient failure:** warm failure invalidates that guild (no fresh stamp) and schedules a **date** job `event-cache-retry-<guild_id>` after `EVENT_CACHE_RETRY_DELAY_SECONDS` (deduped while pending, `max_instances=1`, coalesce + misfire grace).
+- **Manual:** `/rehydrate` force-warms the current guild immediately (same `warmup_connected_event_cache` entrypoint).
+- **Parallelism:** multi-guild warm still uses `EVENT_CACHE_WARM_GUILD_CONCURRENCY` + per-guild locks inside warmup.
+- Legacy `create_interval_job` / `discord.ext.tasks` remains available but is not the event-cache path.
 
 ### Modules
 

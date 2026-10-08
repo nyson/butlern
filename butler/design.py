@@ -179,6 +179,24 @@ ONBOARDING_MESSAGE: Final[str] = (
     "Tack för att du lade till Butler! Ställ in standardkanalen för event med "
     "`/seteventchannel` så att inläggen hamnar rätt. Du kan ändra det senare."
 )
+
+# Admin: force event-option cache rehydrate (no deploy/restart)
+REHYDRATE_COMMAND_DESCRIPTION: Final[str] = (
+    "Force-refresh this server's Discord event autocomplete cache"
+)
+REHYDRATE_GUILD_ONLY_MESSAGE: Final[str] = (
+    "This command must be used in a server."
+)
+REHYDRATE_FAILED_MESSAGE: Final[str] = (
+    "Event cache rehydrate failed. Check bot logs; a delayed retry may still run."
+)
+REHYDRATE_SUCCESS_TEMPLATE: Final[str] = (
+    "Event cache rehydrate finished for this server in {elapsed_ms:.0f}ms.\n"
+    "warmed={warmed}, empty={empty}, skipped={skipped}, failed={failed}, "
+    "options={options}, fresh={fresh}.\n"
+    "Tip: click the event field and type a few letters if Discord does not "
+    "show choices until you type."
+)
 ROOM_OPENED_WITH_MENTIONS_TEMPLATE: Final[str] = (
     "Rummet är öppet! {mentions}\n"
     "{message_link}"

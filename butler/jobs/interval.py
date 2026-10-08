@@ -31,12 +31,12 @@ class IntervalJob:
     def start(self) -> None:
         if not self.loop.is_running():
             self.loop.start()
-            logger.info("Started interval job %s.", self.name)
+            logger.debug("Started interval job %s.", self.name)
 
     def stop(self) -> None:
         if self.loop.is_running():
             self.loop.stop()
-            logger.info("Stopped interval job %s.", self.name)
+            logger.debug("Stopped interval job %s.", self.name)
 
     def cancel(self) -> None:
         """Cancel the underlying task loop (test/teardown helper)."""
@@ -102,7 +102,7 @@ def create_interval_job(
             msg = first_iteration_log or (
                 f"Skipping immediate run of job {name} (boot path already covered it)."
             )
-            logger.info(msg)
+            logger.debug(msg)
             return
         await run()
 

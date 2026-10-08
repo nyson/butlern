@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+import butler.admin_command as admin_command
 import butler.bot_events as bot_events
 import butler.rsvp.event_command as rsvp_event_command
 import butler.settings_command as settings_command
@@ -16,6 +19,7 @@ from butler.design import (
     EVENT_LINK_SUBCOMMAND_DESCRIPTION,
     EVENT_OPTION_DESCRIPTION,
     ONBOARDING_MESSAGE,
+    REHYDRATE_COMMAND_DESCRIPTION,
 )
 from butler.discord_events import BOTC_EDITION_CHOICES
 from butler.discord_helpers import (
@@ -23,6 +27,7 @@ from butler.discord_helpers import (
     resolve_text_channel,
 )
 from butler.domains.rsvp.store import RsvpMessageStore
+from butler.logging_setup import configure_logging
 from butler.permissions import find_onboarding_channel
 from butler.rsvp.controller import RsvpController
 from butler.rsvp.view.event_message_view import EventMessageView
@@ -180,14 +185,26 @@ async def seteventrole(
     )
 
 
+@bot.tree.command(
+    name="rehydrate",
+    description=REHYDRATE_COMMAND_DESCRIPTION,
+)
+@app_commands.guild_only()
+@app_commands.default_permissions(manage_guild=True)
+async def rehydrate(interaction: discord.Interaction) -> None:
+    await admin_command.handle_rehydrate_command(interaction=interaction)
 
-def main(*, force_guild_sync: bool = False) -> None:
+
+def main(*, force_guild_sync: bool = False, log_level: int | None = None) -> None:
     global _force_guild_sync
     _force_guild_sync = force_guild_sync
     if not CONFIG.token:
         raise RuntimeError("Missing DISCORD_TOKEN in .env or the environment.")
-    bot.run(CONFIG.token, root_logger=True)
+    # Production default INFO; butler-dev uses DEBUG for warm/retry tracing.
+    configure_logging(level=logging.INFO if log_level is None else log_level)
+    # log_handler=None: logging already configured (UTC ISO + colour).
+    bot.run(CONFIG.token, log_handler=None)
 
 
 def main_dev() -> None:
-    main(force_guild_sync=True)
+    main(force_guild_sync=True, log_level=logging.DEBUG)

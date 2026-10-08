@@ -193,5 +193,5 @@ async def hydrate_persistent_views(
             bot=bot,
         )
         hydrated += 1
-    logger.info("RSVP hydration complete: restored=%s.", hydrated)
+    logger.debug("RSVP hydration complete: restored=%s.", hydrated)
     return True

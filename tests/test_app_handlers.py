@@ -179,6 +179,55 @@ async def test_seteventrole_save_failure(store: MagicMock) -> None:
     assert "Failed to save" in sent_text(ix.response.send_message)
 
 
+# --- /rehydrate --------------------------------------------------------------
+
+
+async def test_rehydrate_requires_guild() -> None:
+    ix = make_interaction(guild=None)
+    await invoke(app.rehydrate, ix.interaction)
+    assert "must be used in a server" in sent_text(ix.response.send_message)
+
+
+async def test_rehydrate_success_force_warms_current_guild(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import butler.admin_command as admin_command
+    from butler.caches.events import EventCacheWarmResult
+
+    guild = make_guild(guild_id=42)
+    warm = AsyncMock(
+        return_value=EventCacheWarmResult(
+            warmed=1, empty=0, skipped=0, failed=0, elapsed_ms=12.5
+        )
+    )
+    monkeypatch.setattr(admin_command, "warmup_connected_event_cache", warm)
+
+    ix = make_interaction(guild=guild)
+    await invoke(app.rehydrate, ix.interaction)
+
+    ix.response.defer.assert_awaited_once()
+    warm.assert_awaited_once_with(guilds=[guild], force=True)
+    text = sent_text(ix.followup.send)
+    assert "rehydrate finished" in text
+    assert "warmed=1" in text
+    assert "failed=0" in text
+
+
+async def test_rehydrate_reports_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import butler.admin_command as admin_command
+
+    warm = AsyncMock(side_effect=RuntimeError("list exploded"))
+    monkeypatch.setattr(admin_command, "warmup_connected_event_cache", warm)
+
+    ix = make_interaction(guild=make_guild(guild_id=7))
+    await invoke(app.rehydrate, ix.interaction)
+
+    warm.assert_awaited_once()
+    assert "rehydrate failed" in sent_text(ix.followup.send)
+
+
 # --- /event -----------------------------------------------------------------
 
 

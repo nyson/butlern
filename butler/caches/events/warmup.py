@@ -7,9 +7,10 @@ from typing import Literal
 
 from discord import Guild
 
-from butler.caches.events.constants import EVENT_CACHE_RETRY_DELAY_SECONDS
-from butler.caches.events.listing import reusable_scheduled_events_for_guild
+from butler.caches.events.constants import EVENT_CACHE_WARM_GUILD_CONCURRENCY
+from butler.caches.events.listing import load_reusable_events_for_guild
 from butler.caches.events.option_cache import (
+    AUTOCOMPLETE_EVENT_CACHE,
     cache_reusable_events_for_guild,
     event_option_cache_is_fresh,
     invalidate_event_option_cache,
@@ -18,33 +19,61 @@ from butler.timing import stopwatch
 
 logger = logging.getLogger(__name__)
 
+# Per-guild mutual exclusion: force warm + retry + cold-path warm for one guild.
 _WARMUP_LOCKS: dict[int, asyncio.Lock] = {}
-_PENDING_RETRIES: dict[int, asyncio.Task[None]] = {}
+# Process-wide cap on concurrent Guild warms (EVENT_CACHE_WARM_GUILD_CONCURRENCY).
+_WARM_GUILD_CONCURRENCY_LOCK: asyncio.Semaphore | None = None
 
 WarmOutcome = Literal["warmed", "empty", "skipped", "failed"]
 
 
 @dataclass(frozen=True)
-class _WarmupCounters:
+class EventCacheWarmResult:
+    """Aggregate outcomes from a multi-guild (or single-guild) warm pass."""
+
     warmed: int = 0
     empty: int = 0
     skipped: int = 0
     failed: int = 0
+    elapsed_ms: float = 0.0
 
-    def with_warmed(self) -> _WarmupCounters:
-        return _WarmupCounters(self.warmed + 1, self.empty, self.skipped, self.failed)
+    def with_warmed(self) -> EventCacheWarmResult:
+        return EventCacheWarmResult(
+            self.warmed + 1, self.empty, self.skipped, self.failed, self.elapsed_ms
+        )
 
-    def with_empty(self) -> _WarmupCounters:
-        return _WarmupCounters(self.warmed, self.empty + 1, self.skipped, self.failed)
+    def with_empty(self) -> EventCacheWarmResult:
+        return EventCacheWarmResult(
+            self.warmed, self.empty + 1, self.skipped, self.failed, self.elapsed_ms
+        )
 
-    def with_skipped(self) -> _WarmupCounters:
-        return _WarmupCounters(self.warmed, self.empty, self.skipped + 1, self.failed)
+    def with_skipped(self) -> EventCacheWarmResult:
+        return EventCacheWarmResult(
+            self.warmed, self.empty, self.skipped + 1, self.failed, self.elapsed_ms
+        )
 
-    def with_failed(self) -> _WarmupCounters:
-        return _WarmupCounters(self.warmed, self.empty, self.skipped, self.failed + 1)
+    def with_failed(self) -> EventCacheWarmResult:
+        return EventCacheWarmResult(
+            self.warmed, self.empty, self.skipped, self.failed + 1, self.elapsed_ms
+        )
+
+    def with_outcome(self, outcome: WarmOutcome) -> EventCacheWarmResult:
+        if outcome == "warmed":
+            return self.with_warmed()
+        if outcome == "empty":
+            return self.with_empty()
+        if outcome == "failed":
+            return self.with_failed()
+        return self.with_skipped()
+
+    def with_elapsed_ms(self, elapsed_ms: float) -> EventCacheWarmResult:
+        return EventCacheWarmResult(
+            self.warmed, self.empty, self.skipped, self.failed, elapsed_ms
+        )
 
 
 def warmup_lock_for(guild_id: int) -> asyncio.Lock:
+    """Per-guild lock so overlapping warms cannot double-stamp one guild."""
     lock = _WARMUP_LOCKS.get(guild_id)
     if lock is None:
         lock = asyncio.Lock()
@@ -52,72 +81,66 @@ def warmup_lock_for(guild_id: int) -> asyncio.Lock:
     return lock
 
 
+def warm_guild_concurrency_lock() -> asyncio.Semaphore:
+    """Shared semaphore bound to ``EVENT_CACHE_WARM_GUILD_CONCURRENCY``."""
+    global _WARM_GUILD_CONCURRENCY_LOCK
+    if _WARM_GUILD_CONCURRENCY_LOCK is None:
+        _WARM_GUILD_CONCURRENCY_LOCK = asyncio.Semaphore(
+            max(1, EVENT_CACHE_WARM_GUILD_CONCURRENCY)
+        )
+    return _WARM_GUILD_CONCURRENCY_LOCK
+
+
+def reset_warm_guild_concurrency_lock_for_tests() -> None:
+    """Drop the shared guild semaphore so tests can change concurrency and re-bind."""
+    global _WARM_GUILD_CONCURRENCY_LOCK
+    _WARM_GUILD_CONCURRENCY_LOCK = None
+
+
 def cancel_pending_event_cache_retries() -> None:
-    """Cancel in-flight retry tasks (tests / full cache reset)."""
-    pending = list(_PENDING_RETRIES.items())
-    _PENDING_RETRIES.clear()
-    for _guild_id, task in pending:
-        task.cancel()
+    """Cancel scheduled guild retry jobs (tests / full cache reset)."""
+    from butler.jobs import runtime as jobs_runtime
+
+    jobs_runtime.cancel_pending_event_cache_guild_retries()
 
 
 def event_cache_retry_pending(*, guild_id: int) -> bool:
-    task = _PENDING_RETRIES.get(guild_id)
-    return task is not None and not task.done()
+    from butler.jobs import runtime as jobs_runtime
+
+    return jobs_runtime.event_cache_guild_retry_pending(guild_id=guild_id)
 
 
-def schedule_event_cache_retry(*, guild: Guild) -> bool:
-    """Schedule a force warm for ``guild`` after the retry delay.
+def schedule_event_cache_retry(*, guild: Guild, attempt: int = 1) -> bool:
+    """Schedule a force warm for ``guild`` after the retry delay via APScheduler.
 
-    Dedupes per guild while a retry is already pending. Returns True when a new
-    retry was scheduled.
+    Dedupes per guild while a retry job is already pending. Returns True when a
+    new retry was scheduled. ``attempt`` drives exponential backoff.
     """
-    guild_id = guild.id
-    if event_cache_retry_pending(guild_id=guild_id):
-        return False
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        logger.warning(
-            "Cannot schedule event-cache retry guild=%s: no running event loop",
-            guild_id,
-        )
-        return False
+    from butler.jobs import runtime as jobs_runtime
 
-    task = loop.create_task(
-        _run_event_cache_retry(guild),
-        name=f"event-cache-retry-{guild_id}",
+    return jobs_runtime.schedule_event_cache_guild_retry(
+        guild_id=guild.id,
+        attempt=attempt,
     )
-    _PENDING_RETRIES[guild_id] = task
-    logger.info(
-        "Scheduled event-cache retry guild=%s in %.0fs",
-        guild_id,
-        EVENT_CACHE_RETRY_DELAY_SECONDS,
-    )
-    return True
-
-
-async def _run_event_cache_retry(guild: Guild) -> None:
-    guild_id = guild.id
-    try:
-        await asyncio.sleep(EVENT_CACHE_RETRY_DELAY_SECONDS)
-        logger.info("Running event-cache retry warm guild=%s", guild_id)
-        await warmup_connected_event_cache(guilds=[guild], force=True)
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        logger.exception("Event-cache retry warm failed guild=%s", guild_id)
-        # Leave cache cold; a later lookup can schedule another retry.
-    finally:
-        current = _PENDING_RETRIES.get(guild_id)
-        if current is asyncio.current_task():
-            _PENDING_RETRIES.pop(guild_id, None)
 
 
 def _should_skip_guild(*, guild_id: int, force: bool) -> bool:
     return not force and event_option_cache_is_fresh(guild_id=guild_id)
 
 
-async def _warm_guild(*, guild: Guild, force: bool) -> WarmOutcome:
+def _next_retry_attempt(*, retry_attempt: int | None) -> int:
+    """Map in-flight retry attempt to the next schedule attempt (1-based)."""
+    if retry_attempt is None:
+        return 1
+    return max(1, retry_attempt) + 1
+
+
+async def _warm_guild(
+    *,
+    guild: Guild,
+    force: bool,
+    retry_attempt: int | None = None,
+) -> WarmOutcome:
     """Warm one guild. Returns outcome: warmed | empty | skipped | failed."""
     if _should_skip_guild(guild_id=guild.id, force=force):
         return "skipped"
@@ -126,27 +149,57 @@ async def _warm_guild(*, guild: Guild, force: bool) -> WarmOutcome:
         if _should_skip_guild(guild_id=guild.id, force=force):
             return "skipped"
 
+        # Keep any previous options readable until the new list is applied (or we
+        # invalidate on hard failure). Autocomplete stays stale-while-revalidate
+        # during slow Discord list HTTP (often ~10s) and network blips.
         try:
-            candidates = await reusable_scheduled_events_for_guild(guild=guild)
-            cache_reusable_events_for_guild(guild_id=guild.id, events=candidates)
+            loaded = await load_reusable_events_for_guild(guild=guild)
         except Exception:
-            # Keep the guild cold/unclean rather than publishing a partial stamp.
-            invalidate_event_option_cache(guild_id=guild.id)
+            # Unexpected failure: drop stamp only if we have nothing useful left.
+            if guild.id not in AUTOCOMPLETE_EVENT_CACHE:
+                invalidate_event_option_cache(guild_id=guild.id)
             logger.exception("Event cache warmup failed guild=%s", guild.id)
-            # Proactively retry after the delay so boot/daily failures recover
-            # without waiting for a cold autocomplete hit.
-            schedule_event_cache_retry(guild=guild)
+            schedule_event_cache_retry(
+                guild=guild,
+                attempt=_next_retry_attempt(retry_attempt=retry_attempt),
+            )
             return "failed"
 
+        candidates = loaded.events
+        if not loaded.http_ok:
+            # Transient network: never stamp a fresh empty over good options.
+            if candidates:
+                cache_reusable_events_for_guild(guild_id=guild.id, events=candidates)
+                logger.warning(
+                    "Event cache warmup degraded guild=%s http_ok=false "
+                    "cached_gateway_or_partial=%s; scheduling retry",
+                    guild.id,
+                    len(candidates),
+                )
+            else:
+                logger.warning(
+                    "Event cache warmup http failed guild=%s with no fallback events; "
+                    "keeping prior options=%s and scheduling retry",
+                    guild.id,
+                    len(AUTOCOMPLETE_EVENT_CACHE.get(guild.id, [])),
+                )
+            schedule_event_cache_retry(
+                guild=guild,
+                attempt=_next_retry_attempt(retry_attempt=retry_attempt),
+            )
+            return "failed"
+
+        cache_reusable_events_for_guild(guild_id=guild.id, events=candidates)
+
         if not candidates:
-            logger.info(
+            logger.debug(
                 "Event cache warmup: guild=%s, reusable_event=none",
                 guild.id,
             )
             return "empty"
 
         selected = candidates[0]
-        logger.info(
+        logger.debug(
             "Event cache warmup: guild=%s, reusable_event=%s (%s)",
             guild.id,
             selected.id,
@@ -155,18 +208,30 @@ async def _warm_guild(*, guild: Guild, force: bool) -> WarmOutcome:
         return "warmed"
 
 
-async def _warm_guilds(*, guilds: list[Guild], force: bool) -> _WarmupCounters:
-    counters = _WarmupCounters()
-    for guild in guilds:
-        outcome = await _warm_guild(guild=guild, force=force)
-        if outcome == "warmed":
-            counters = counters.with_warmed()
-        elif outcome == "empty":
-            counters = counters.with_empty()
-        elif outcome == "failed":
-            counters = counters.with_failed()
-        else:
-            counters = counters.with_skipped()
+async def _warm_guilds(
+    *,
+    guilds: list[Guild],
+    force: bool,
+    retry_attempt: int | None = None,
+) -> EventCacheWarmResult:
+    """Warm many Guilds in parallel under ``warm_guild_concurrency_lock()``."""
+    if not guilds:
+        return EventCacheWarmResult()
+
+    guild_concurrency = warm_guild_concurrency_lock()
+
+    async def _bounded(guild: Guild) -> WarmOutcome:
+        async with guild_concurrency:
+            return await _warm_guild(
+                guild=guild,
+                force=force,
+                retry_attempt=retry_attempt,
+            )
+
+    outcomes = await asyncio.gather(*(_bounded(guild) for guild in guilds))
+    counters = EventCacheWarmResult()
+    for outcome in outcomes:
+        counters = counters.with_outcome(outcome)
     return counters
 
 
@@ -174,25 +239,46 @@ async def warmup_connected_event_cache(
     *,
     guilds: list[Guild],
     force: bool = False,
-) -> None:
+    retry_attempt: int | None = None,
+) -> EventCacheWarmResult:
     """Warm picker/autocomplete options. Reuses TTL cache unless ``force``.
 
     Job / boot entrypoint:
     - boot ``on_ready``: ``force=True`` once so slash autocomplete is hot
-    - daily interval job: ``force=True`` to repair drift
+    - APScheduler interval job: ``force=True`` before soft TTL expires
+    - manual ``/rehydrate``: ``force=True`` for the current guild
+    - failure path: invalidate + schedule date retry job
 
-    Per-guild failures leave that guild cold (no fresh stamp) so lookups can
-    detect the unclean state and schedule a delayed retry.
+    Guilds warm concurrently under ``warm_guild_concurrency_lock()``.
+    Per-guild failures leave that guild cold (no fresh stamp).
     """
     async with stopwatch() as elapsed:
-        counters = await _warm_guilds(guilds=guilds, force=force)
-    logger.info(
-        "Event cache warmup complete: cached=%s, empty=%s, skipped=%s failed=%s "
-        "force=%s took %.1fms",
-        counters.warmed,
-        counters.empty,
-        counters.skipped,
-        counters.failed,
-        force,
-        elapsed.ms,
-    )
+        counters = await _warm_guilds(
+            guilds=guilds,
+            force=force,
+            retry_attempt=retry_attempt,
+        )
+    result = counters.with_elapsed_ms(elapsed.ms)
+    if result.failed > 0:
+        logger.warning(
+            "Event cache warmup complete with failures: cached=%s, empty=%s, "
+            "skipped=%s failed=%s force=%s took %.1fms",
+            result.warmed,
+            result.empty,
+            result.skipped,
+            result.failed,
+            force,
+            result.elapsed_ms,
+        )
+    else:
+        logger.debug(
+            "Event cache warmup complete: cached=%s, empty=%s, skipped=%s failed=%s "
+            "force=%s took %.1fms",
+            result.warmed,
+            result.empty,
+            result.skipped,
+            result.failed,
+            force,
+            result.elapsed_ms,
+        )
+    return result

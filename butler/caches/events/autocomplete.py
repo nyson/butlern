@@ -54,13 +54,27 @@ def _cached_event_choices(
     if guild is None:
         return [create_new_choice()] if include_create_new else []
 
-    if not event_option_cache_is_fresh(guild_id=guild.id):
+    guild_id = guild.id
+    has_entries = guild_id in AUTOCOMPLETE_EVENT_CACHE
+    fresh = event_option_cache_is_fresh(guild_id=guild_id)
+
+    if not fresh:
+        # Always try to repair drift / cold TTL in the background.
         _schedule_cold_cache_retry(guild=guild)
-        raise EventOptionCacheColdError(
-            f"Event option cache is cold for guild {guild.id}"
+        if not has_entries:
+            # Truly empty: no options to serve (link shows nothing; create keeps sentinel).
+            raise EventOptionCacheColdError(
+                f"Event option cache is cold for guild {guild_id}"
+            )
+        # Stale-while-revalidate: keep serving last options so /event link is usable
+        # while a warm/retry is in flight (e.g. slow rehydrate HTTP).
+        logger.debug(
+            "Event option cache stale guild=%s; serving %s cached option(s) while refresh runs",
+            guild_id,
+            len(AUTOCOMPLETE_EVENT_CACHE.get(guild_id, [])),
         )
 
-    candidates = list(AUTOCOMPLETE_EVENT_CACHE.get(guild.id, []))
+    candidates = list(AUTOCOMPLETE_EVENT_CACHE.get(guild_id, []))
     query = current.strip().casefold()
     if query:
         candidates = [
@@ -75,6 +89,14 @@ def _cached_event_choices(
         app_commands.Choice(name=name, value=value)
         for name, value in candidates[:limit]
     ]
+    logger.debug(
+        "event autocomplete guild=%s fresh=%s query_len=%s options=%s include_create=%s",
+        guild_id,
+        fresh,
+        len(query),
+        len(event_choices),
+        include_create_new,
+    )
     if include_create_new:
         return [create_new_choice(), *event_choices]
     return event_choices

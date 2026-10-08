@@ -22,10 +22,11 @@ async def test_list_scheduled_events_once_falls_back_on_oserror(
 
     monkeypatch.setattr(event_listing, "fetch_raw_scheduled_events", _boom)
 
-    events, rules = await event_listing.list_scheduled_events_once(guild=guild)
+    listed = await event_listing.list_scheduled_events_once(guild=guild)
 
-    assert events == [event]
-    assert rules == {}
+    assert listed.events == [event]
+    assert listed.recurrence_rules == {}
+    assert listed.http_ok is True
     cast(Any, guild).fetch_scheduled_events.assert_awaited_once()
 
 
@@ -42,10 +43,11 @@ async def test_list_scheduled_events_once_returns_empty_when_both_paths_fail(
 
     monkeypatch.setattr(event_listing, "fetch_raw_scheduled_events", _boom)
 
-    events, rules = await event_listing.list_scheduled_events_once(guild=guild)
+    listed = await event_listing.list_scheduled_events_once(guild=guild)
 
-    assert events == []
-    assert rules == {}
+    assert listed.events == []
+    assert listed.recurrence_rules == {}
+    assert listed.http_ok is False
 
 
 async def test_reusable_scheduled_events_uses_gateway_cache_after_list_failure(
@@ -54,15 +56,16 @@ async def test_reusable_scheduled_events_uses_gateway_cache_after_list_failure(
     event = make_scheduled_event(event_id=9, name="Gateway")
     guild = make_guild(guild_id=3, scheduled_events=[event])
 
-    async def _boom(*, guild: object) -> tuple[list[object], dict[int, object]]:
+    async def _boom(*, guild: object) -> object:
         _ = guild
         raise RuntimeError("unexpected list failure")
 
     monkeypatch.setattr(event_listing, "list_scheduled_events_once", _boom)
 
-    reusable = await event_listing.reusable_scheduled_events_for_guild(guild=guild)
+    loaded = await event_listing.load_reusable_events_for_guild(guild=guild)
 
-    assert reusable == [event]
+    assert loaded.events == [event]
+    assert loaded.http_ok is False
 
 
 async def test_hydrate_skips_malformed_payloads(
@@ -92,10 +95,11 @@ async def test_hydrate_skips_malformed_payloads(
         AsyncMock(return_value=raw_events),
     )
 
-    events, rules = await event_listing.list_scheduled_events_once(guild=guild)
+    listed = await event_listing.list_scheduled_events_once(guild=guild)
 
-    assert events == [good]
-    assert rules == {}
+    assert listed.events == [good]
+    assert listed.recurrence_rules == {}
+    assert listed.http_ok is True
     cast(Any, guild).fetch_scheduled_events.assert_not_awaited()
 
 

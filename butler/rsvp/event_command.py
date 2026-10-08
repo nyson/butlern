@@ -423,7 +423,7 @@ async def _post_rsvp_for_resolved_event(
     active_views: MutableMapping[int, EventMessageView],
 ) -> None:
     selected_edition = edition.value if edition is not None else "Custom"
-    logger.info(
+    logger.debug(
         "/event edition selection guild_id=%s choice_present=%s choice_name=%r "
         "choice_value=%r selected_edition=%r",
         guild.id,
@@ -436,7 +436,7 @@ async def _post_rsvp_for_resolved_event(
         guild=guild,
         edition=selected_edition,
     )
-    logger.info(
+    logger.debug(
         "/event edition media resolved guild_id=%s selected_edition=%r emoji=%r image_url=%r",
         guild.id,
         selected_edition,

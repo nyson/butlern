@@ -63,9 +63,10 @@ from butler.discord_events import (
     event_start_unix,
     resolve_edition_media,
 )
-from butler.domains.rsvp.domain import RoomSnapshot
-from butler.domains.rsvp.types import ViewState
+from butler.domains.rsvp.domain import add_room
+from butler.domains.rsvp.types import RoomEntry, ViewState
 from butler.event_logic import EventInput, normalize_room_url, resolve_event_input
+from butler.rooms import fetch_botc_join_snapshot, is_botc_join_url
 from butler.rsvp.controller import RsvpController
 from butler.rsvp.runtime import bind_and_register_posted_view
 from butler.rsvp.view.event_message_view import EventMessageView
@@ -299,6 +300,21 @@ def _event_input_from_scheduled_event(
     )
 
 
+async def _initial_rooms_for_event(*, room_url: str | None) -> tuple[RoomEntry, ...]:
+    """Build multi-room list from optional /event room_link (with botc fetch)."""
+    if room_url is None or not room_url.strip():
+        return ()
+    botc = None
+    if is_botc_join_url(room_url):
+        botc = await fetch_botc_join_snapshot(room_url)
+        logger.debug(
+            "/event room_link botc fetch url=%s occupancy=%s",
+            room_url,
+            None if botc is None else botc.occupancy,
+        )
+    return add_room((), url=room_url, botc=botc)
+
+
 def _view_state_for_event(
     *,
     event_object: discord.ScheduledEvent | None,
@@ -307,38 +323,25 @@ def _view_state_for_event(
     selected_edition: str,
     selected_edition_emoji: str | None,
     selected_edition_image_url: str | None,
-    room_snapshot: RoomSnapshot,
+    rooms: tuple[RoomEntry, ...],
 ) -> tuple[ViewState, str]:
     """Build view state and display name."""
-    if event_object is not None:
-        return (
-            ViewState(
-                event_name=event_object.name,
-                start_unix=event_start_unix(event=event_object),
-                event_url=event_url,
-                edition=selected_edition,
-                edition_emoji=selected_edition_emoji,
-                room_state=room_snapshot.state,
-                room_url=room_snapshot.url,
-                edition_image_url=selected_edition_image_url,
-                event_description=event_input.description,
-            ),
-            event_object.name,
-        )
-    return (
-        ViewState(
-            event_name=event_input.title,
-            start_unix=int(event_input.start_utc.timestamp()),
-            event_url=event_url,
-            edition=selected_edition,
-            edition_emoji=selected_edition_emoji,
-            room_state=room_snapshot.state,
-            room_url=room_snapshot.url,
-            edition_image_url=selected_edition_image_url,
-            event_description=event_input.description,
+    base = ViewState(
+        event_name=event_object.name if event_object is not None else event_input.title,
+        start_unix=(
+            event_start_unix(event=event_object)
+            if event_object is not None
+            else int(event_input.start_utc.timestamp())
         ),
-        event_input.title,
+        event_url=event_url,
+        edition=selected_edition,
+        edition_emoji=selected_edition_emoji,
+        edition_image_url=selected_edition_image_url,
+        event_description=event_input.description,
     )
+    view_state = base.with_rooms(rooms) if rooms else base
+    display_name = event_object.name if event_object is not None else event_input.title
+    return view_state, display_name
 
 
 def _event_success_message(
@@ -443,7 +446,7 @@ async def _post_rsvp_for_resolved_event(
         selected_edition_emoji,
         selected_edition_image_url,
     )
-    room_snapshot = RoomSnapshot.from_url(event_input.room_url)
+    rooms = await _initial_rooms_for_event(room_url=event_input.room_url)
     view_state, display_name = _view_state_for_event(
         event_object=event_object,
         event_input=event_input,
@@ -451,7 +454,7 @@ async def _post_rsvp_for_resolved_event(
         selected_edition=selected_edition,
         selected_edition_emoji=selected_edition_emoji,
         selected_edition_image_url=selected_edition_image_url,
-        room_snapshot=room_snapshot,
+        rooms=rooms,
     )
 
     view = EventMessageView(

@@ -1,21 +1,32 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import TypeAlias
 
 from butler.domains.result import ServiceResult, ok
 from butler.domains.rsvp.domain import (
-    RoomSnapshot,
     RsvpResponse,
+    add_room,
     apply_arrival_time,
+    apply_botc_snapshot,
     apply_status_update,
     apply_storyteller_role,
+    close_all_open_rooms,
+    close_room,
+    prune_stale_closed_rooms,
+    remove_room,
 )
 from butler.domains.rsvp.store import RsvpMessageStore
-from butler.domains.rsvp.types import RsvpStatus, ViewState
+from butler.domains.rsvp.types import RoomEntry, RsvpStatus, ViewState, rooms_from_legacy
+from butler.rooms.constants import next_room_check_iso
+from butler.rooms.types import BotcJoinSnapshot
 from butler.rsvp.snapshot import RsvpRenderSnapshot
+
+logger = logging.getLogger(__name__)
 
 SnapshotResult: TypeAlias = ServiceResult[RsvpRenderSnapshot]
 ViewMutationResult: TypeAlias = ServiceResult[tuple[ViewState, RsvpRenderSnapshot]]
@@ -80,8 +91,11 @@ class RsvpController:
                 responses = self._store.all_responses(message_id)
             except OSError:
                 responses = dict(self._ephemeral.get(message_id, {}))
-        room_url = view_state.room_url if view_state.room_state == "open" else None
-        effective_state = replace(view_state, room_url=room_url)
+        rooms = view_state.rooms or rooms_from_legacy(
+            room_state=view_state.room_state,
+            room_url=view_state.room_url,
+        )
+        effective_state = view_state.with_rooms(rooms) if rooms != view_state.rooms else view_state
         return RsvpRenderSnapshot(view_state=effective_state, responses=responses)
 
     def _get_response(self, message_id: int | None, user_id: int) -> RsvpResponse:
@@ -230,16 +244,25 @@ class RsvpController:
             mutator=lambda current: apply_arrival_time(current, arrival_time=arrival_time),
         )
 
+    def _rooms(self, view_state: ViewState) -> tuple[RoomEntry, ...]:
+        if view_state.rooms:
+            return view_state.rooms
+        return rooms_from_legacy(
+            room_state=view_state.room_state,
+            room_url=view_state.room_url,
+        )
+
     async def open_room(
         self,
         *,
         message_id: int | None,
         view_state: ViewState,
         room_url: str,
+        botc: BotcJoinSnapshot | None = None,
     ) -> ViewMutationResult:
         async with self._lock_for(message_id):
-            room = RoomSnapshot.from_url(room_url)
-            new_state = replace(view_state, room_state=room.state, room_url=room.url)
+            rooms = add_room(self._rooms(view_state), url=room_url, botc=botc)
+            new_state = view_state.with_rooms(rooms)
             self._write_view_state(message_id=message_id, view_state=new_state)
             snapshot = self._snapshot_unlocked(message_id=message_id, view_state=new_state)
             return ok((new_state, snapshot))
@@ -249,13 +272,87 @@ class RsvpController:
         *,
         message_id: int | None,
         view_state: ViewState,
+        room_id: str | None = None,
     ) -> ViewMutationResult:
         async with self._lock_for(message_id):
-            room = RoomSnapshot.closed()
-            new_state = replace(view_state, room_state=room.state, room_url=room.url)
+            current = self._rooms(view_state)
+            if room_id is None:
+                rooms = close_all_open_rooms(current)
+            else:
+                rooms = close_room(current, room_id=room_id)
+            new_state = view_state.with_rooms(rooms)
             self._write_view_state(message_id=message_id, view_state=new_state)
             snapshot = self._snapshot_unlocked(message_id=message_id, view_state=new_state)
             return ok((new_state, snapshot))
+
+    async def close_all_rooms(
+        self,
+        *,
+        message_id: int | None,
+        view_state: ViewState,
+    ) -> ViewMutationResult:
+        return await self.close_room(
+            message_id=message_id,
+            view_state=view_state,
+            room_id=None,
+        )
+
+    async def remove_room(
+        self,
+        *,
+        message_id: int | None,
+        view_state: ViewState,
+        room_id: str,
+    ) -> ViewMutationResult:
+        async with self._lock_for(message_id):
+            rooms = remove_room(self._rooms(view_state), room_id=room_id)
+            new_state = view_state.with_rooms(rooms)
+            self._write_view_state(message_id=message_id, view_state=new_state)
+            snapshot = self._snapshot_unlocked(message_id=message_id, view_state=new_state)
+            return ok((new_state, snapshot))
+
+    async def apply_room_poll_results(
+        self,
+        *,
+        message_id: int,
+        view_state: ViewState,
+        updates: dict[str, BotcJoinSnapshot],
+        now_unix: int,
+    ) -> tuple[ViewState, RsvpRenderSnapshot, tuple[RoomEntry, ...]]:
+        """Apply botc snapshots; return state, snapshot, newly opened rooms."""
+        async with self._lock_for(message_id):
+            current = list(self._rooms(view_state))
+            newly_opened: list[RoomEntry] = []
+            next_rooms: list[RoomEntry] = []
+            for room in current:
+                snapshot = updates.get(room.room_id)
+                if snapshot is None:
+                    next_rooms.append(room)
+                    continue
+                updated, opened = apply_botc_snapshot(
+                    room,
+                    snapshot=snapshot,
+                    now_unix=now_unix,
+                )
+                next_rooms.append(updated)
+                if opened:
+                    newly_opened.append(updated)
+            pruned = prune_stale_closed_rooms(next_rooms, now_unix=now_unix)
+            new_state = view_state.with_rooms(pruned)
+            self._write_view_state(message_id=message_id, view_state=new_state)
+            render = self._snapshot_unlocked(message_id=message_id, view_state=new_state)
+            checked_at = datetime.fromtimestamp(now_unix, tz=UTC)
+            next_check = next_room_check_iso(now=checked_at)
+            logger.debug(
+                "room poll applied message_id=%s checked=%s newly_opened=%s "
+                "remaining=%s next_check=%s",
+                message_id,
+                len(updates),
+                len(newly_opened),
+                len(pruned),
+                next_check,
+            )
+            return new_state, render, tuple(newly_opened)
 
     async def update_linked_event(
         self,

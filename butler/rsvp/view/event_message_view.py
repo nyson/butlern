@@ -27,8 +27,9 @@ from butler.design import (
     CANT_EMOJI,
     MAYBE_BUTTON_LABEL,
     MAYBE_EMOJI,
+    ROOM_CLOSE_ALL_BUTTON_EMOJI,
+    ROOM_CLOSE_ALL_BUTTON_LABEL,
     ROOM_CLOSE_BUTTON_EMOJI,
-    ROOM_CLOSE_BUTTON_LABEL,
     ROOM_LINK_MODAL_INVALID_MESSAGE,
     ROOM_LINK_PROMPT_BUTTON_EMOJI,
     ROOM_LINK_PROMPT_BUTTON_LABEL,
@@ -38,14 +39,20 @@ from butler.design import (
 )
 from butler.discord_events import build_event_url, event_start_unix
 from butler.domains.result import Err, Ok, ServiceError
-from butler.domains.rsvp.domain import RsvpResponse, visible_room_buttons
-from butler.domains.rsvp.types import RsvpStatus, ViewState
+from butler.domains.rsvp.domain import (
+    RsvpResponse,
+    format_room_block,
+    open_room_ids,
+    visible_room_buttons,
+)
+from butler.domains.rsvp.types import RoomEntry, RsvpStatus, ViewState, rooms_from_legacy
 from butler.event_logic import normalize_room_url
 from butler.permissions import (
     can_manage_room_action,
     room_permission_denied_message,
     select_event_permission_denied_message,
 )
+from butler.rooms import fetch_botc_join_snapshot, is_botc_join_url
 from butler.rsvp.controller import RsvpController
 from butler.rsvp.modals.arrive_later import ArriveLaterModal, parse_arrival_time
 from butler.rsvp.modals.room_link import RoomLinkModal
@@ -163,17 +170,27 @@ class RsvpMetaActions(ui.ActionRow["EventMessageView"]):
         await self.root.toggle_storyteller(interaction)
 
 
+def _rooms_on_view(view: EventMessageView) -> tuple[RoomEntry, ...]:
+    if view.view_state.rooms:
+        return view.view_state.rooms
+    return rooms_from_legacy(
+        room_state=view.view_state.room_state,
+        room_url=view.view_state.room_url,
+    )
+
+
 class RoomActions(ui.ActionRow["EventMessageView"]):
-    """Storyteller row: open/close room."""
+    """Storyteller row: add room + close all open rooms."""
 
     def __init__(self, root: EventMessageView) -> None:
         super().__init__()
         self.root = root
-        visible = visible_room_buttons(root.view_state.room_state)
+        rooms = _rooms_on_view(root)
+        visible = visible_room_buttons(rooms)
         if "open_or_prompt" not in visible:
             self.remove_item(self.open_room)
-        if "close" not in visible:
-            self.remove_item(self.close_room)
+        if "close_all" not in visible:
+            self.remove_item(self.close_all_rooms)
 
     @ui.button(
         label=ROOM_LINK_PROMPT_BUTTON_LABEL,
@@ -189,17 +206,63 @@ class RoomActions(ui.ActionRow["EventMessageView"]):
         await self.root.open_room_modal(interaction)
 
     @ui.button(
-        label=ROOM_CLOSE_BUTTON_LABEL,
-        emoji=ROOM_CLOSE_BUTTON_EMOJI,
+        label=ROOM_CLOSE_ALL_BUTTON_LABEL,
+        emoji=ROOM_CLOSE_ALL_BUTTON_EMOJI,
         style=discord.ButtonStyle.danger,
-        custom_id="butler:rsvp:close-room",
+        custom_id="butler:rsvp:close-all-rooms",
     )
-    async def close_room(
+    async def close_all_rooms(
         self,
         interaction: discord.Interaction,
         _button: ui.Button[EventMessageView],
     ) -> None:
-        await self.root.close_room(interaction)
+        await self.root.close_all_rooms(interaction)
+
+
+class CloseRoomButton(ui.Button["EventMessageView"]):
+    """Close one open room (lives on that room's action row)."""
+
+    def __init__(self, *, root: EventMessageView, room: RoomEntry) -> None:
+        super().__init__(
+            label="Stäng",
+            emoji=ROOM_CLOSE_BUTTON_EMOJI,
+            style=discord.ButtonStyle.danger,
+            custom_id=f"butler:rsvp:close-room:{room.room_id}",
+        )
+        self.root = root
+        self.room_id = room.room_id
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await self.root.close_room(interaction, room_id=self.room_id)
+
+
+class RoomItemActions(ui.ActionRow["EventMessageView"]):
+    """Action row bound to a single open room (Stäng only)."""
+
+    def __init__(self, root: EventMessageView, room: RoomEntry) -> None:
+        super().__init__()
+        self.root = root
+        self.add_item(CloseRoomButton(root=root, room=room))
+
+
+def build_room_container(
+    root: EventMessageView,
+    room: RoomEntry,
+) -> ui.Container[EventMessageView]:
+    """One Discord Container: room section text + optional close row."""
+    if room.state == "open":
+        accent = discord.Colour.green()
+    elif room.state == "closed":
+        accent = discord.Colour.dark_grey()
+    else:
+        accent = discord.Colour.gold()
+
+    children: list[ui.Item[EventMessageView]] = [
+        ui.TextDisplay(format_room_block(room)),
+    ]
+    if room.state == "open":
+        children.append(RoomItemActions(root, room))
+    return ui.Container(*children, accent_colour=accent)
 
 
 class EventMessageView(ui.LayoutView):
@@ -251,6 +314,10 @@ class EventMessageView(ui.LayoutView):
         self.clear_items()
         snapshot = self.snapshot()
         self.add_item(build_rsvp_body_item(snapshot))
+        # Each room is its own Container so text + Stäng stay visually coupled.
+        for room in _rooms_on_view(self):
+            self.add_item(build_room_container(self, room))
+        # Player RSVP first; ST room management below.
         self.add_item(RsvpStatusActions(self))
         self.add_item(RsvpMetaActions(self))
         self.add_item(RoomActions(self))
@@ -551,15 +618,23 @@ class EventMessageView(ui.LayoutView):
             )
             return
         await interaction.response.defer(thinking=False)
+        botc = None
+        if is_botc_join_url(normalized):
+            botc = await fetch_botc_join_snapshot(
+                normalized,
+                message_id=self.message_id,
+            )
         result = await self.controller.open_room(
             message_id=self.message_id,
             view_state=self.view_state,
             room_url=normalized,
+            botc=botc,
         )
         match result:
             case Ok((_new_state, snapshot)):
                 await self.apply_and_edit(interaction, snapshot)
-                if interaction.message is not None:
+                newly_open = botc is None or botc.occupancy == "open"
+                if newly_open and interaction.message is not None:
                     await announce_room_opening(
                         interaction=interaction,
                         user_ids=self.user_ids_for_statuses(("Available", "Maybe")),
@@ -568,7 +643,12 @@ class EventMessageView(ui.LayoutView):
             case Err(error):
                 await self._reply_service_error(interaction, error, deferred=True)
 
-    async def close_room(self, interaction: discord.Interaction) -> None:
+    async def close_room(
+        self,
+        interaction: discord.Interaction,
+        *,
+        room_id: str | None = None,
+    ) -> None:
         role_id = self.event_manager_role_id(interaction)
         if not can_manage_room_action(interaction, event_manager_role_id=role_id):
             await interaction.response.send_message(
@@ -577,7 +657,42 @@ class EventMessageView(ui.LayoutView):
             )
             return
         await interaction.response.defer(thinking=False)
+        if room_id is None:
+            open_ids = open_room_ids(_rooms_on_view(self))
+            if len(open_ids) == 1:
+                room_id = open_ids[0]
+            else:
+                result = await self.controller.close_all_rooms(
+                    message_id=self.message_id,
+                    view_state=self.view_state,
+                )
+                match result:
+                    case Ok((_new_state, snapshot)):
+                        await self.apply_and_edit(interaction, snapshot)
+                    case Err(error):
+                        await self._reply_service_error(interaction, error, deferred=True)
+                return
         result = await self.controller.close_room(
+            message_id=self.message_id,
+            view_state=self.view_state,
+            room_id=room_id,
+        )
+        match result:
+            case Ok((_new_state, snapshot)):
+                await self.apply_and_edit(interaction, snapshot)
+            case Err(error):
+                await self._reply_service_error(interaction, error, deferred=True)
+
+    async def close_all_rooms(self, interaction: discord.Interaction) -> None:
+        role_id = self.event_manager_role_id(interaction)
+        if not can_manage_room_action(interaction, event_manager_role_id=role_id):
+            await interaction.response.send_message(
+                room_permission_denied_message(interaction, event_manager_role_id=role_id),
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer(thinking=False)
+        result = await self.controller.close_all_rooms(
             message_id=self.message_id,
             view_state=self.view_state,
         )

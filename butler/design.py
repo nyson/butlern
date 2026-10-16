@@ -26,7 +26,10 @@ ROOM_MANAGEMENT_BUTTON_EMOJI: Final[str] = "🛠️"
 
 ROOM_CLOSE_BUTTON_LABEL: Final[str] = "ST: Stäng rummet"
 ROOM_CLOSE_BUTTON_EMOJI: Final[str] = "🔒"
-ROOM_LINK_PROMPT_BUTTON_LABEL: Final[str] = "ST: Öppna rummet"
+ROOM_CLOSE_ALL_BUTTON_LABEL: Final[str] = "ST: Stäng alla rum"
+ROOM_CLOSE_ALL_BUTTON_EMOJI: Final[str] = "🔐"
+ROOM_REMOVE_BUTTON_EMOJI: Final[str] = "🔓"
+ROOM_LINK_PROMPT_BUTTON_LABEL: Final[str] = "ST: Öppna rum"
 ROOM_LINK_PROMPT_BUTTON_EMOJI: Final[str] = "🔗"
 ROOM_LINK_PERMISSION_DENIED_MESSAGE: Final[str] = (
     "Du behöver storyteller-rollen för att öppna eller stänga rum."
@@ -169,7 +172,7 @@ ROOM_MANAGEMENT_CONTENT_TEMPLATE: Final[str] = (
 
 ROOM_LINK_MODAL_TITLE: Final[str] = "Lägg till rumslänk"
 ROOM_LINK_MODAL_LABEL: Final[str] = "Rumslänk (http/https)"
-ROOM_LINK_MODAL_PLACEHOLDER: Final[str] = "https://example.com/rum"
+ROOM_LINK_MODAL_PLACEHOLDER: Final[str] = "https://botc.app/join/…"
 ROOM_LINK_MODAL_MAX_LENGTH: Final[int] = 250
 ROOM_LINK_MODAL_INVALID_MESSAGE: Final[str] = (
     "Ogiltig länk. Använd en fullständig URL som börjar med http:// eller https://."

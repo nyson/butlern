@@ -1,11 +1,23 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+import hashlib
+import time
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, replace
 from typing import Final
+from uuid import uuid4
 
 from butler.design import STORYTELLER_EMOJI
-from butler.domains.rsvp.types import RoomButton, RoomState, RsvpRole, RsvpStatus
+from butler.domains.rsvp.types import (
+    ROOM_CLOSED_PRUNE_SECONDS,
+    RoomButton,
+    RoomEntry,
+    RoomState,
+    RsvpRole,
+    RsvpStatus,
+)
+from butler.rooms.types import BotcJoinSnapshot
+from butler.rooms.urls import botc_join_code, is_botc_join_url
 
 REACTION_STATUS_PRECEDENCE: Final[tuple[RsvpStatus, ...]] = (
     "Maybe",
@@ -30,10 +42,212 @@ class RoomSnapshot:
         return cls(state="closed", url=None)
 
 
-def visible_room_buttons(room_state: RoomState) -> frozenset[RoomButton]:
-    if room_state == "open":
-        return frozenset({"close"})
-    return frozenset({"open_or_prompt"})
+def new_room_id(url: str) -> str:
+    digest = hashlib.sha1(url.encode("utf-8")).hexdigest()[:12]
+    return f"r_{digest}_{uuid4().hex[:6]}"
+
+
+def visible_room_buttons(rooms: Sequence[RoomEntry]) -> frozenset[RoomButton]:
+    buttons: set[RoomButton] = {"open_or_prompt"}
+    if rooms:
+        buttons.add("remove")
+        # Close-all lives on the main ST row whenever any room is attached,
+        # so pending/closed rooms are not stuck without a bulk action.
+        buttons.add("close_all")
+    if any(room.state == "open" for room in rooms):
+        buttons.add("close")
+    return frozenset(buttons)
+
+
+def open_room_ids(rooms: Sequence[RoomEntry]) -> tuple[str, ...]:
+    return tuple(room.room_id for room in rooms if room.state == "open")
+
+
+def add_room(
+    rooms: Sequence[RoomEntry],
+    *,
+    url: str,
+    now_unix: int | None = None,
+    botc: BotcJoinSnapshot | None = None,
+) -> tuple[RoomEntry, ...]:
+    normalized = url.strip()
+    for existing in rooms:
+        if existing.url.casefold() == normalized.casefold():
+            return tuple(rooms)
+
+    label = botc_join_code(normalized) if is_botc_join_url(normalized) else None
+    stamp = int(time.time() if now_unix is None else now_unix)
+    if botc is not None and botc.occupancy == "closed":
+        state: RoomState = "closed"
+    elif botc is not None and botc.occupancy == "open":
+        state = "open"
+    elif is_botc_join_url(normalized) and botc is None:
+        # Prefer usable open link over endless "waiting" when fetch failed.
+        state = "open"
+    else:
+        state = "open"
+
+    entry = RoomEntry(
+        room_id=new_room_id(normalized),
+        url=normalized,
+        label=label,
+        state=state,
+        source="polled" if is_botc_join_url(normalized) else "manual",
+        last_checked_unix=stamp if botc is not None else None,
+        closed_at_unix=stamp if state == "closed" else None,
+        botc=botc if state == "open" and botc is not None else None,
+    )
+    return (*rooms, entry)
+
+
+def remove_room(
+    rooms: Sequence[RoomEntry],
+    *,
+    room_id: str,
+) -> tuple[RoomEntry, ...]:
+    """Detach a room from the RSVP message entirely (decouple)."""
+    return tuple(room for room in rooms if room.room_id != room_id)
+
+
+def close_room(
+    rooms: Sequence[RoomEntry],
+    *,
+    room_id: str,
+    now_unix: int | None = None,
+) -> tuple[RoomEntry, ...]:
+    stamp = int(time.time() if now_unix is None else now_unix)
+    updated: list[RoomEntry] = []
+    for room in rooms:
+        if room.room_id != room_id:
+            updated.append(room)
+            continue
+        updated.append(
+            replace(
+                room,
+                state="closed",
+                botc=None,
+                closed_at_unix=room.closed_at_unix or stamp,
+            )
+        )
+    return tuple(updated)
+
+
+def close_all_open_rooms(
+    rooms: Sequence[RoomEntry],
+    *,
+    now_unix: int | None = None,
+) -> tuple[RoomEntry, ...]:
+    """Close every open room; drop pending (never fully linked) rooms."""
+    stamp = int(time.time() if now_unix is None else now_unix)
+    updated: list[RoomEntry] = []
+    for room in rooms:
+        if room.state == "pending":
+            continue
+        if room.state != "open":
+            updated.append(room)
+            continue
+        updated.append(
+            replace(
+                room,
+                state="closed",
+                botc=None,
+                closed_at_unix=room.closed_at_unix or stamp,
+            )
+        )
+    return tuple(updated)
+
+
+def apply_botc_snapshot(
+    room: RoomEntry,
+    *,
+    snapshot: BotcJoinSnapshot,
+    now_unix: int,
+) -> tuple[RoomEntry, bool]:
+    """Return (updated_room, newly_opened)."""
+    previous = room.state
+    if snapshot.occupancy == "open":
+        updated = replace(
+            room,
+            state="open",
+            label=snapshot.code or room.label,
+            last_checked_unix=now_unix,
+            closed_at_unix=None,
+            botc=snapshot,
+            source="polled",
+        )
+        return updated, previous != "open"
+    if snapshot.occupancy == "closed":
+        updated = replace(
+            room,
+            state="closed",
+            label=snapshot.code or room.label,
+            last_checked_unix=now_unix,
+            closed_at_unix=room.closed_at_unix or now_unix,
+            botc=None,
+            source="polled",
+        )
+        return updated, False
+    return replace(room, last_checked_unix=now_unix), False
+
+
+def prune_stale_closed_rooms(
+    rooms: Sequence[RoomEntry],
+    *,
+    now_unix: int,
+    max_closed_age: int = ROOM_CLOSED_PRUNE_SECONDS,
+) -> tuple[RoomEntry, ...]:
+    kept: list[RoomEntry] = []
+    for room in rooms:
+        if room.state != "closed" or room.closed_at_unix is None:
+            kept.append(room)
+            continue
+        if now_unix - room.closed_at_unix >= max_closed_age:
+            continue
+        kept.append(room)
+    return tuple(kept)
+
+
+def format_room_section(rooms: Sequence[RoomEntry]) -> str | None:
+    if not rooms:
+        return None
+    return "\n\n".join(format_room_block(room) for room in rooms)
+
+
+def format_room_block(room: RoomEntry) -> str:
+    """Markdown block for one room (used inside a LayoutView Section/Container)."""
+    # Heading-sized label; bare URL stays plain so Discord keeps it copyable.
+    lines = [f"### Rumslänk: {room.url}"]
+    if room.state == "pending":
+        lines.append("Väntar på uppdatering…")
+        return "\n".join(lines)
+    if room.state == "closed":
+        lines.append("Stängt")
+        return "\n".join(lines)
+
+    botc = room.botc
+    if botc is not None:
+        lines.extend(_format_open_botc_lines(botc))
+    return "\n".join(lines)
+
+
+def _format_open_botc_lines(botc: BotcJoinSnapshot) -> list[str]:
+    lines: list[str] = []
+    if botc.phase:
+        lines.append(f"**Fas:** {botc.phase}")
+    if botc.storytellers:
+        names = ", ".join(person.name for person in botc.storytellers)
+        lines.append(f"**Storytellers:** {names}")
+    filled = botc.filled_players
+    total = botc.player_count if botc.player_count is not None else len(botc.players)
+    if filled:
+        names = ", ".join(person.name for person in filled)
+        suffix = f" ({len(filled)}/{total})" if total else ""
+        lines.append(f"**Spelare{suffix}:** {names}")
+    elif total:
+        lines.append(f"**Spelare:** 0/{total}")
+    if botc.edition:
+        lines.append(f"**Edition:** {botc.edition}")
+    return lines
 
 
 @dataclass(frozen=True)

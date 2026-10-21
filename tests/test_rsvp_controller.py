@@ -211,12 +211,15 @@ async def test_open_and_close_room_update_view_state(
     )
     assert isinstance(closed_result, Ok)
     closed_state, closed_snap = closed_result.value
-    assert closed_state.room_state == "closed"
+    # Bulk close clears sections and unregisters rooms from poll tracking.
+    assert closed_state.rooms == ()
+    assert closed_state.room_state == "pending"
     assert closed_state.room_url is None
     assert closed_snap.room_url is None
     stored = controller._store.get_message(101)
     assert stored is not None
-    assert stored.view_state.room_state == "closed"
+    assert stored.view_state.rooms == ()
+    assert stored.view_state.room_state == "pending"
 
 
 async def test_remove_response(
@@ -353,12 +356,13 @@ async def test_render_shows_placeholder_when_all_status_sections_empty(
     assert "Kan inte" not in content
 
 
-async def test_view_layout_is_body_plus_three_action_rows(
+async def test_view_layout_is_body_plus_room_controls_and_action_rows(
     controller: RsvpController,
 ) -> None:
     linked = _view_state(event_url="https://discord.com/events/1/2")
     view = EventMessageView(view_state=linked, controller=controller)
     # Event card lives on a companion message, not inside the LayoutView.
+    # No rooms: body + status + meta + ST RoomActions.
     assert len(view.children) == 4
     from butler.rsvp.view.body import RsvpBodyDisplay
 
@@ -380,6 +384,8 @@ async def test_render_room_open_line(
     controller: RsvpController,
     state: ViewState,
 ) -> None:
+    from butler.domains.rsvp.domain import format_room_block
+
     controller.bind_message(
         message_id=101,
         channel_id=10,
@@ -392,9 +398,14 @@ async def test_render_room_open_line(
         room_url="https://example.com/room",
     )
     assert isinstance(result, Ok)
-    _new_state, snap = result.value
-    content = format_rsvp_body(snap)
+    new_state, snap = result.value
+    assert snap.view_state.rooms
+    content = format_room_block(new_state.rooms[0])
     assert "https://example.com/room" in content
+    view = EventMessageView(view_state=new_state, controller=controller)
+    # body + 1 room container + status + meta + ST RoomActions
+    assert len(view.children) == 5
+    assert isinstance(view.children[1], discord.ui.Container)
 
 
 def _room_actions(view: EventMessageView) -> RoomActions:
@@ -455,8 +466,40 @@ async def test_room_actions_visibility_pending_vs_open(
     view.apply_snapshot(snap)
     room_row = _room_actions(view)
     labels = [cast(Any, child).label for child in room_row.children]
-    assert any(label and "Stäng" in label for label in labels)
+    # Global ST row below RSVP: open + close-all; per-room Stäng lives in Container.
+    assert any(label and "Öppna" in label for label in labels)
+    assert any(label and "Stäng alla" in label for label in labels)
     assert not any(label and "Koppla evenemang" in label for label in labels)
+    room_container = next(
+        child for child in view.children if isinstance(child, discord.ui.Container)
+    )
+    per_room_labels: list[str] = []
+    for item in room_container.children:
+        if isinstance(item, discord.ui.ActionRow):
+            per_room_labels.extend(
+                cast(str, cast(Any, btn).label) for btn in item.children
+            )
+    assert per_room_labels == ["Stäng"]
+
+    closed_result = await controller.close_room(
+        message_id=None,
+        view_state=new_state,
+        room_id=new_state.rooms[0].room_id,
+    )
+    assert isinstance(closed_result, Ok)
+    closed_state, closed_snap = closed_result.value
+    view.view_state = closed_state
+    view.apply_snapshot(closed_snap)
+    closed_container = next(
+        child for child in view.children if isinstance(child, discord.ui.Container)
+    )
+    closed_labels: list[str] = []
+    for item in closed_container.children:
+        if isinstance(item, discord.ui.ActionRow):
+            closed_labels.extend(
+                cast(str, cast(Any, btn).label) for btn in item.children
+            )
+    assert closed_labels == ["Stäng"]
 
 
 async def test_view_bind_message_context_persists(
@@ -486,6 +529,7 @@ async def test_view_set_status_defers_and_updates(
     stored = controller._store.get_rsvp_response(404, 42)
     assert stored is not None
     assert stored.status == "Maybe"
+    # body + RoomActions + status + meta (no rooms attached)
     assert len(view.children) == 4
 
 

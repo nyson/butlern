@@ -6,8 +6,9 @@
         "seteventchannel",
         "storytella"
     ],
-    "python.analysis.typeCheckingMode": "strict",
+    "python.analysis.typeCheckingMode": "off",
     "python.analysis.autoImportCompletions": true,
+    "python.analysis.languageServerMode": "full",
     "python.testing.pytestArgs": [
         "tests"
     ],
@@ -15,5 +16,10 @@
     "python.testing.pytestEnabled": true,
     "python-envs.defaultEnvManager": "ms-python.python:poetry",
     "python-envs.defaultPackageManager": "ms-python.python:poetry",
-    "python.analysis.languageServerMode": "full"
+    "mypy-type-checker.importStrategy": "fromEnvironment",
+    "mypy-type-checker.preferDaemon": true,
+    "mypy-type-checker.reportingScope": "workspace",
+    "mypy-type-checker.args": [
+        "--config-file=${workspaceFolder}/pyproject.toml"
+    ]
 }

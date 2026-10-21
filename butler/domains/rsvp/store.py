@@ -7,7 +7,14 @@ from typing import Final, cast
 
 from butler.base import Store
 from butler.domains.rsvp.domain import RsvpResponse
-from butler.domains.rsvp.types import RoomState, RsvpRole, RsvpStatus, ViewState
+from butler.domains.rsvp.rooms_codec import rooms_from_json, rooms_to_json
+from butler.domains.rsvp.types import (
+    RoomState,
+    RsvpRole,
+    RsvpStatus,
+    ViewState,
+    rooms_from_legacy,
+)
 
 SCHEMA_SQL: Final[str] = """
 CREATE TABLE IF NOT EXISTS rsvp_message (
@@ -23,7 +30,8 @@ CREATE TABLE IF NOT EXISTS rsvp_message (
     room_url TEXT NULL,
     edition_image_url TEXT NULL,
     event_description TEXT NOT NULL,
-    event_card_message_id INTEGER NULL
+    event_card_message_id INTEGER NULL,
+    rooms_json TEXT NULL
 );
 
 CREATE TABLE IF NOT EXISTS rsvp_response (
@@ -79,9 +87,10 @@ class RsvpMessageStore(Store):
                 room_url,
                 edition_image_url,
                 event_description,
-                event_card_message_id
+                event_card_message_id,
+                rooms_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(message_id)
             DO UPDATE SET
                 channel_id = excluded.channel_id,
@@ -95,7 +104,8 @@ class RsvpMessageStore(Store):
                 room_url = excluded.room_url,
                 edition_image_url = excluded.edition_image_url,
                 event_description = excluded.event_description,
-                event_card_message_id = excluded.event_card_message_id
+                event_card_message_id = excluded.event_card_message_id,
+                rooms_json = excluded.rooms_json
             """,
             (
                 message_id,
@@ -111,6 +121,7 @@ class RsvpMessageStore(Store):
                 view_state.edition_image_url,
                 view_state.event_description,
                 view_state.event_card_message_id,
+                rooms_to_json(view_state.rooms),
             ),
         )
 
@@ -132,7 +143,8 @@ class RsvpMessageStore(Store):
                         room_url,
                         edition_image_url,
                         event_description,
-                        event_card_message_id
+                        event_card_message_id,
+                        rooms_json
                     FROM rsvp_message
                     WHERE message_id = ?
                     """,
@@ -162,7 +174,8 @@ class RsvpMessageStore(Store):
                         room_url,
                         edition_image_url,
                         event_description,
-                        event_card_message_id
+                        event_card_message_id,
+                        rooms_json
                     FROM rsvp_message
                     ORDER BY message_id
                     """
@@ -185,7 +198,8 @@ class RsvpMessageStore(Store):
                 room_url = ?,
                 edition_image_url = ?,
                 event_description = ?,
-                event_card_message_id = ?
+                event_card_message_id = ?,
+                rooms_json = ?
             WHERE message_id = ?
             """,
             (
@@ -199,6 +213,7 @@ class RsvpMessageStore(Store):
                 view_state.edition_image_url,
                 view_state.event_description,
                 view_state.event_card_message_id,
+                rooms_to_json(view_state.rooms),
                 message_id,
             ),
         )
@@ -343,6 +358,10 @@ class RsvpMessageStore(Store):
                     connection.execute("DROP TABLE IF EXISTS rsvp_response")
                     connection.execute("DROP TABLE IF EXISTS rsvp_message")
                     connection.executescript(SCHEMA_SQL)
+                elif "rooms_json" not in message_columns:
+                    connection.execute(
+                        "ALTER TABLE rsvp_message ADD COLUMN rooms_json TEXT NULL"
+                    )
                 connection.commit()
         except sqlite3.Error as exc:
             raise OSError(f"Failed to persist RSVP state in {self.path}.") from exc
@@ -367,23 +386,29 @@ class RsvpMessageStore(Store):
         channel_id = self._required_int(values[1], "channel_id")
         guild_id = self._required_int(values[2], "guild_id")
         room_state = cast(RoomState, str(values[8]))
+        room_url = self._optional_str(values[9])
         card_raw = values[12] if len(values) > 12 else None
         event_card_message_id = (
             self._required_int(card_raw, "event_card_message_id")
             if card_raw is not None
             else None
         )
+        rooms_raw = values[13] if len(values) > 13 else None
+        rooms = rooms_from_json(self._optional_str(rooms_raw))
+        if not rooms:
+            rooms = rooms_from_legacy(room_state=room_state, room_url=room_url)
         view_state = ViewState(
             event_name=str(values[3]),
             start_unix=self._required_int(values[4], "start_unix"),
             event_url=str(values[5]),
             edition=self._optional_str(values[6]),
             edition_emoji=self._optional_str(values[7]),
-            room_state=room_state,
-            room_url=self._optional_str(values[9]),
             edition_image_url=self._optional_str(values[10]),
             event_description=str(values[11]),
+            rooms=rooms,
             event_card_message_id=event_card_message_id,
+            room_state=room_state,
+            room_url=room_url,
         )
         return StoredRsvpMessage(
             message_id=message_id,

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
@@ -31,6 +31,7 @@ BotFactory = Callable[[], commands.Bot]
 
 DAILY_EVENT_CACHE_JOB_ID = "event-cache-daily-warm"
 GUILD_RETRY_JOB_ID_PREFIX = "event-cache-retry-"
+ROOM_POLL_JOB_ID = "room-poll-interval"
 
 # Interval slightly under soft TTL so force warm runs before options expire.
 EVENT_CACHE_DAILY_INTERVAL_SECONDS = max(60.0, EVENT_OPTION_CACHE_TTL_SECONDS * 0.9)
@@ -57,6 +58,7 @@ class ButlerScheduler:
         self._scheduler: AsyncIOScheduler | None = None
         self._bound_loop: asyncio.AbstractEventLoop | None = None
         self._daily_registered = False
+        self._room_poll_registered = False
         self._grace = max(1, int(EVENT_CACHE_RETRY_DELAY_SECONDS * 5))
 
     def _build_scheduler(self, loop: asyncio.AbstractEventLoop) -> AsyncIOScheduler:
@@ -85,6 +87,7 @@ class ButlerScheduler:
         self._scheduler = self._build_scheduler(loop)
         self._bound_loop = loop
         self._daily_registered = False
+        self._room_poll_registered = False
         return self._scheduler
 
     @property
@@ -191,6 +194,43 @@ class ButlerScheduler:
         if job is not None:
             job.remove()
         self._daily_registered = False
+
+    def ensure_room_poll_job(
+        self,
+        run: Callable[[], Awaitable[None]],
+        *,
+        seconds: float,
+        job_id: str = ROOM_POLL_JOB_ID,
+    ) -> None:
+        """Register interval botc room tracking; first fire after one interval."""
+        scheduler = self._ensure_scheduler()
+        if self._room_poll_registered and scheduler.get_job(job_id) is not None:
+            return
+        first = datetime.now(UTC) + timedelta(seconds=seconds)
+        scheduler.add_job(
+            run,
+            trigger="interval",
+            seconds=seconds,
+            id=job_id,
+            name="botc room poll",
+            replace_existing=True,
+            next_run_time=first,
+        )
+        self._room_poll_registered = True
+        logger.debug(
+            "Registered room-poll job id=%s interval=%.0fs first=%s",
+            job_id,
+            seconds,
+            first.isoformat(),
+        )
+
+    def cancel_room_poll_job(self, *, job_id: str = ROOM_POLL_JOB_ID) -> None:
+        if self._scheduler is None:
+            return
+        job = self._scheduler.get_job(job_id)
+        if job is not None:
+            job.remove()
+        self._room_poll_registered = False
 
     async def warm_connected_guilds(
         self,

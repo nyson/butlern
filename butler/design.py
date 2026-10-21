@@ -26,7 +26,10 @@ ROOM_MANAGEMENT_BUTTON_EMOJI: Final[str] = "🛠️"
 
 ROOM_CLOSE_BUTTON_LABEL: Final[str] = "ST: Stäng rummet"
 ROOM_CLOSE_BUTTON_EMOJI: Final[str] = "🔒"
-ROOM_LINK_PROMPT_BUTTON_LABEL: Final[str] = "ST: Öppna rummet"
+ROOM_CLOSE_ALL_BUTTON_LABEL: Final[str] = "ST: Stäng alla rum"
+ROOM_CLOSE_ALL_BUTTON_EMOJI: Final[str] = "🔐"
+ROOM_REMOVE_BUTTON_EMOJI: Final[str] = "🔓"
+ROOM_LINK_PROMPT_BUTTON_LABEL: Final[str] = "ST: Öppna rum"
 ROOM_LINK_PROMPT_BUTTON_EMOJI: Final[str] = "🔗"
 ROOM_LINK_PERMISSION_DENIED_MESSAGE: Final[str] = (
     "Du behöver storyteller-rollen för att öppna eller stänga rum."
@@ -169,7 +172,7 @@ ROOM_MANAGEMENT_CONTENT_TEMPLATE: Final[str] = (
 
 ROOM_LINK_MODAL_TITLE: Final[str] = "Lägg till rumslänk"
 ROOM_LINK_MODAL_LABEL: Final[str] = "Rumslänk (http/https)"
-ROOM_LINK_MODAL_PLACEHOLDER: Final[str] = "https://example.com/rum"
+ROOM_LINK_MODAL_PLACEHOLDER: Final[str] = "https://botc.app/join/…"
 ROOM_LINK_MODAL_MAX_LENGTH: Final[int] = 250
 ROOM_LINK_MODAL_INVALID_MESSAGE: Final[str] = (
     "Ogiltig länk. Använd en fullständig URL som börjar med http:// eller https://."
@@ -196,6 +199,36 @@ REHYDRATE_SUCCESS_TEMPLATE: Final[str] = (
     "options={options}, fresh={fresh}.\n"
     "Tip: click the event field and type a few letters if Discord does not "
     "show choices until you type."
+)
+
+# /rooms update — manual botc join page refetch for attached RSVP rooms
+ROOMS_GROUP_DESCRIPTION: Final[str] = "Hantera BOTC-rum kopplade till RSVP-inlägg"
+ROOMS_UPDATE_SUBCOMMAND_DESCRIPTION: Final[str] = (
+    "Hämta om status för alla botc.app-rum i den här servern"
+)
+ROOMS_UPDATE_GUILD_ONLY_MESSAGE: Final[str] = "This command must be used in a server."
+ROOMS_UPDATE_PERMISSION_DENIED_MESSAGE: Final[str] = (
+    f"Du behöver behörigheten {MANAGE_SERVER_PERMISSION_LABEL} för att uppdatera rum."
+)
+ROOMS_UPDATE_FAILED_MESSAGE: Final[str] = (
+    "Kunde inte uppdatera rummen. Kolla botloggarna och försök igen."
+)
+ROOMS_UPDATE_SUCCESS_TEMPLATE: Final[str] = (
+    "Rums-uppdatering klar på {elapsed_ms:.0f}ms.\n"
+    "rsvp_messages={messages_seen}, with_botc={messages_with_botc_rooms}, "
+    "rooms_checked={rooms_checked}, rooms_failed={rooms_failed}, "
+    "messages_edited={messages_edited}, newly_opened={newly_opened}."
+)
+ROOMS_PRUNE_SUBCOMMAND_DESCRIPTION: Final[str] = (
+    "Ta bort stängda rumsektioner från RSVP-inlägg i den här servern"
+)
+ROOMS_PRUNE_FAILED_MESSAGE: Final[str] = (
+    "Kunde inte rensa stängda rum. Kolla botloggarna och försök igen."
+)
+ROOMS_PRUNE_SUCCESS_TEMPLATE: Final[str] = (
+    "Rensning av stängda rum klar på {elapsed_ms:.0f}ms.\n"
+    "rsvp_messages={messages_seen}, with_closed={messages_with_closed}, "
+    "rooms_removed={rooms_removed}, messages_edited={messages_edited}."
 )
 ROOM_OPENED_WITH_MENTIONS_TEMPLATE: Final[str] = (
     "Rummet är öppet! {mentions}\n"

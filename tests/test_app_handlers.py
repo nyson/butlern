@@ -228,6 +228,105 @@ async def test_rehydrate_reports_failure(
     assert "rehydrate failed" in sent_text(ix.followup.send)
 
 
+# --- /rooms update -----------------------------------------------------------
+
+
+async def test_rooms_update_requires_guild() -> None:
+    ix = make_interaction(guild=None)
+    await invoke(app.rooms_update, ix.interaction)
+    assert "must be used in a server" in sent_text(ix.response.send_message)
+
+
+async def test_rooms_update_requires_manage_guild() -> None:
+    ix = make_interaction(
+        guild=make_guild(guild_id=1),
+        user=make_member(permissions=make_permissions(manage_guild=False)),
+    )
+    await invoke(app.rooms_update, ix.interaction)
+    assert "Hantera server" in sent_text(ix.response.send_message)
+
+
+async def test_rooms_update_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    import butler.rooms_command as rooms_command
+    from butler.rsvp.room_poll import RoomPollSummary
+
+    refresh = AsyncMock(
+        return_value=RoomPollSummary(
+            messages_seen=2,
+            messages_with_botc_rooms=1,
+            rooms_checked=3,
+            rooms_failed=0,
+            messages_edited=1,
+            newly_opened=1,
+            elapsed_ms=42.0,
+        )
+    )
+    monkeypatch.setattr(rooms_command, "refresh_guild_botc_rooms", refresh)
+
+    guild = make_guild(guild_id=42)
+    ix = make_interaction(guild=guild, user=make_member())
+    await invoke(app.rooms_update, ix.interaction)
+
+    ix.response.defer.assert_awaited_once()
+    refresh.assert_awaited_once()
+    assert refresh.await_args is not None
+    assert refresh.await_args.kwargs["guild_id"] == 42
+    text = sent_text(ix.followup.send)
+    assert "Rums-uppdatering klar" in text
+    assert "rooms_checked=3" in text
+    assert "newly_opened=1" in text
+
+
+async def test_rooms_update_reports_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    import butler.rooms_command as rooms_command
+
+    refresh = AsyncMock(side_effect=RuntimeError("fetch exploded"))
+    monkeypatch.setattr(rooms_command, "refresh_guild_botc_rooms", refresh)
+
+    ix = make_interaction(guild=make_guild(guild_id=7), user=make_member())
+    await invoke(app.rooms_update, ix.interaction)
+
+    refresh.assert_awaited_once()
+    assert "Kunde inte uppdatera rummen" in sent_text(ix.followup.send)
+
+
+async def test_rooms_prune_requires_manage_guild() -> None:
+    ix = make_interaction(
+        guild=make_guild(guild_id=1),
+        user=make_member(permissions=make_permissions(manage_guild=False)),
+    )
+    await invoke(app.rooms_prune, ix.interaction)
+    assert "Hantera server" in sent_text(ix.response.send_message)
+
+
+async def test_rooms_prune_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    import butler.rooms_command as rooms_command
+    from butler.rooms_command import RoomPruneSummary
+
+    prune = AsyncMock(
+        return_value=RoomPruneSummary(
+            messages_seen=4,
+            messages_with_closed=2,
+            rooms_removed=3,
+            messages_edited=2,
+            elapsed_ms=15.0,
+        )
+    )
+    monkeypatch.setattr(rooms_command, "prune_guild_closed_rooms", prune)
+
+    guild = make_guild(guild_id=42)
+    ix = make_interaction(guild=guild, user=make_member())
+    await invoke(app.rooms_prune, ix.interaction)
+
+    ix.response.defer.assert_awaited_once()
+    prune.assert_awaited_once()
+    assert prune.await_args is not None
+    assert prune.await_args.kwargs["guild_id"] == 42
+    text = sent_text(ix.followup.send)
+    assert "Rensning av stängda rum klar" in text
+    assert "rooms_removed=3" in text
+
+
 # --- /event -----------------------------------------------------------------
 
 

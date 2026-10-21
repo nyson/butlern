@@ -211,12 +211,15 @@ async def test_open_and_close_room_update_view_state(
     )
     assert isinstance(closed_result, Ok)
     closed_state, closed_snap = closed_result.value
-    assert closed_state.room_state == "closed"
+    # Bulk close clears sections and unregisters rooms from poll tracking.
+    assert closed_state.rooms == ()
+    assert closed_state.room_state == "pending"
     assert closed_state.room_url is None
     assert closed_snap.room_url is None
     stored = controller._store.get_message(101)
     assert stored is not None
-    assert stored.view_state.room_state == "closed"
+    assert stored.view_state.rooms == ()
+    assert stored.view_state.room_state == "pending"
 
 
 async def test_remove_response(

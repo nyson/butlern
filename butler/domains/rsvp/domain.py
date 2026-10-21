@@ -16,6 +16,7 @@ from butler.domains.rsvp.types import (
     RsvpRole,
     RsvpStatus,
 )
+from butler.rooms.constants import ROOM_EMPTY_ABANDON_SECONDS
 from butler.rooms.types import BotcJoinSnapshot
 from butler.rooms.urls import botc_join_code, is_botc_join_url
 
@@ -87,15 +88,22 @@ def add_room(
     else:
         state = "open"
 
-    entry = RoomEntry(
-        room_id=new_room_id(normalized),
-        url=normalized,
-        label=label,
-        state=state,
-        source="polled" if is_botc_join_url(normalized) else "manual",
-        last_checked_unix=stamp if botc is not None else None,
-        closed_at_unix=stamp if state == "closed" else None,
-        botc=botc if state == "open" and botc is not None else None,
+    open_botc = botc if state == "open" and botc is not None else None
+    empty_since = (
+        stamp if open_botc is not None and _snapshot_is_empty(open_botc) else None
+    )
+    entry = with_room_content_hash(
+        RoomEntry(
+            room_id=new_room_id(normalized),
+            url=normalized,
+            label=label,
+            state=state,
+            source="polled" if is_botc_join_url(normalized) else "manual",
+            last_checked_unix=stamp if botc is not None else None,
+            closed_at_unix=stamp if state == "closed" else None,
+            empty_since_unix=empty_since,
+            botc=open_botc,
+        )
     )
     return (*rooms, entry)
 
@@ -122,11 +130,14 @@ def close_room(
             updated.append(room)
             continue
         updated.append(
-            replace(
-                room,
-                state="closed",
-                botc=None,
-                closed_at_unix=room.closed_at_unix or stamp,
+            with_room_content_hash(
+                replace(
+                    room,
+                    state="closed",
+                    botc=None,
+                    closed_at_unix=room.closed_at_unix or stamp,
+                    empty_since_unix=None,
+                )
             )
         )
     return tuple(updated)
@@ -137,7 +148,7 @@ def close_all_open_rooms(
     *,
     now_unix: int | None = None,
 ) -> tuple[RoomEntry, ...]:
-    """Close every open room; drop pending (never fully linked) rooms."""
+    """Mark every open room closed (keep sections); drop pending rooms."""
     stamp = int(time.time() if now_unix is None else now_unix)
     updated: list[RoomEntry] = []
     for room in rooms:
@@ -147,93 +158,23 @@ def close_all_open_rooms(
             updated.append(room)
             continue
         updated.append(
-            replace(
-                room,
-                state="closed",
-                botc=None,
-                closed_at_unix=room.closed_at_unix or stamp,
+            with_room_content_hash(
+                replace(
+                    room,
+                    state="closed",
+                    botc=None,
+                    closed_at_unix=room.closed_at_unix or stamp,
+                    empty_since_unix=None,
+                )
             )
         )
     return tuple(updated)
 
 
-def apply_botc_snapshot(
-    room: RoomEntry,
-    *,
-    snapshot: BotcJoinSnapshot,
-    now_unix: int,
-) -> tuple[RoomEntry, bool]:
-    """Return (updated_room, newly_opened)."""
-    previous = room.state
-    if snapshot.occupancy == "open":
-        updated = replace(
-            room,
-            state="open",
-            label=snapshot.code or room.label,
-            last_checked_unix=now_unix,
-            closed_at_unix=None,
-            botc=snapshot,
-            source="polled",
-        )
-        return updated, previous != "open"
-    if snapshot.occupancy == "closed":
-        updated = replace(
-            room,
-            state="closed",
-            label=snapshot.code or room.label,
-            last_checked_unix=now_unix,
-            closed_at_unix=room.closed_at_unix or now_unix,
-            botc=None,
-            source="polled",
-        )
-        return updated, False
-    return replace(room, last_checked_unix=now_unix), False
-
-
-def room_display_signature(room: RoomEntry) -> tuple[object, ...]:
-    """Fields that affect the Discord room section (text + controls), not poll metadata."""
-    botc = room.botc
-    if botc is None:
-        botc_key: tuple[object, ...] = ()
-    else:
-        botc_key = (
-            botc.occupancy,
-            botc.edition,
-            botc.phase,
-            botc.player_count,
-            tuple((person.name, person.is_empty_seat) for person in botc.storytellers),
-            tuple((person.name, person.is_empty_seat) for person in botc.players),
-        )
-    return (room.room_id, room.url, room.state, room.label, botc_key)
-
-
-def rooms_display_signature(rooms: Sequence[RoomEntry]) -> tuple[tuple[object, ...], ...]:
-    return tuple(room_display_signature(room) for room in rooms)
-
-
-def rooms_require_rerender(
-    before: Sequence[RoomEntry],
-    after: Sequence[RoomEntry],
-) -> bool:
-    """True when Discord room sections would look/behave differently."""
-    return rooms_display_signature(before) != rooms_display_signature(after)
-
-
-def prune_stale_closed_rooms(
-    rooms: Sequence[RoomEntry],
-    *,
-    now_unix: int,
-    max_closed_age: int = ROOM_CLOSED_PRUNE_SECONDS,
-) -> tuple[RoomEntry, ...]:
-    kept: list[RoomEntry] = []
-    for room in rooms:
-        if room.state != "closed" or room.closed_at_unix is None:
-            kept.append(room)
-            continue
-        if now_unix - room.closed_at_unix >= max_closed_age:
-            continue
-        kept.append(room)
-    return tuple(kept)
+def clear_all_rooms(rooms: Sequence[RoomEntry]) -> tuple[RoomEntry, ...]:
+    """Remove every room section and stop tracking/polling them."""
+    _ = rooms
+    return ()
 
 
 def format_room_section(rooms: Sequence[RoomEntry]) -> str | None:
@@ -257,6 +198,168 @@ def format_room_block(room: RoomEntry) -> str:
     if botc is not None:
         lines.extend(_format_open_botc_lines(botc))
     return "\n".join(lines)
+
+
+def _snapshot_is_empty(snapshot: BotcJoinSnapshot) -> bool:
+    return len(snapshot.filled_players) == 0 and len(snapshot.storytellers) == 0
+
+
+def _filled_player_count(snapshot: BotcJoinSnapshot | None) -> int:
+    if snapshot is None:
+        return 0
+    return len(snapshot.filled_players)
+
+
+def room_track_signature(room: RoomEntry) -> tuple[object, ...]:
+    """Fields that trigger RSVP Discord updates while tracking an open room."""
+    if room.state != "open":
+        return (room.state, room.url)
+    botc = room.botc
+    return (
+        room.state,
+        room.url,
+        None if botc is None else botc.phase,
+        None if botc is None else botc.edition,
+        _filled_player_count(botc),
+    )
+
+
+def room_content_hash(room: RoomEntry) -> str:
+    """Hash of tracked room fields: state, phase, player count, edition."""
+    payload = repr(room_track_signature(room)).encode()
+    return hashlib.sha256(payload).hexdigest()[:32]
+
+
+def with_room_content_hash(room: RoomEntry) -> RoomEntry:
+    digest = room_content_hash(room)
+    if room.content_hash == digest:
+        return room
+    return replace(room, content_hash=digest)
+
+
+def _close_tracked_room(
+    room: RoomEntry,
+    *,
+    now_unix: int,
+    label: str | None,
+) -> RoomEntry:
+    return with_room_content_hash(
+        replace(
+            room,
+            state="closed",
+            label=label if label is not None else room.label,
+            last_checked_unix=now_unix,
+            closed_at_unix=room.closed_at_unix or now_unix,
+            empty_since_unix=None,
+            botc=None,
+            source="polled",
+        )
+    )
+
+
+def apply_botc_snapshot(
+    room: RoomEntry,
+    *,
+    snapshot: BotcJoinSnapshot,
+    now_unix: int,
+    empty_abandon_seconds: int = ROOM_EMPTY_ABANDON_SECONDS,
+) -> tuple[RoomEntry, bool]:
+    """Return (updated_room, newly_opened).
+
+    Tracks open rooms until abandoned:
+    - botc occupancy closed, or
+    - 0 filled players and 0 storytellers for ``empty_abandon_seconds``.
+
+    Discord re-render is driven by content_hash (state/phase/player count/edition).
+    """
+    previous = room.state
+    label = snapshot.code or room.label
+
+    if snapshot.occupancy == "closed":
+        candidate = _close_tracked_room(room, now_unix=now_unix, label=label)
+    elif snapshot.occupancy != "open":
+        return replace(room, last_checked_unix=now_unix), False
+    else:
+        empty = _snapshot_is_empty(snapshot)
+        if empty:
+            empty_since = room.empty_since_unix or now_unix
+            if now_unix - empty_since >= empty_abandon_seconds:
+                candidate = _close_tracked_room(room, now_unix=now_unix, label=label)
+            else:
+                candidate = with_room_content_hash(
+                    replace(
+                        room,
+                        state="open",
+                        label=label,
+                        last_checked_unix=now_unix,
+                        closed_at_unix=None,
+                        empty_since_unix=empty_since,
+                        botc=snapshot,
+                        source="polled",
+                    )
+                )
+        else:
+            candidate = with_room_content_hash(
+                replace(
+                    room,
+                    state="open",
+                    label=label,
+                    last_checked_unix=now_unix,
+                    closed_at_unix=None,
+                    empty_since_unix=None,
+                    botc=snapshot,
+                    source="polled",
+                )
+            )
+
+    newly_opened = previous != "open" and candidate.state == "open"
+    if room_track_signature(room) == room_track_signature(candidate):
+        # No Discord-tracked field change; still refresh timers/roster payload.
+        if (
+            room.last_checked_unix == candidate.last_checked_unix
+            and room.empty_since_unix == candidate.empty_since_unix
+            and room.botc == candidate.botc
+            and room.label == candidate.label
+            and room.content_hash == candidate.content_hash
+            and room.state == candidate.state
+        ):
+            return room, False
+        return candidate, False
+    return candidate, newly_opened
+
+
+
+def rooms_content_hash(rooms: Sequence[RoomEntry]) -> str:
+    """Hash of all room visible sections (order-sensitive)."""
+    payload = "|".join(
+        room.content_hash or room_content_hash(room) for room in rooms
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()[:32]
+
+
+def rooms_require_rerender(
+    before: Sequence[RoomEntry],
+    after: Sequence[RoomEntry],
+) -> bool:
+    """True when Discord room sections would look/behave differently."""
+    return rooms_content_hash(before) != rooms_content_hash(after)
+
+
+def prune_stale_closed_rooms(
+    rooms: Sequence[RoomEntry],
+    *,
+    now_unix: int,
+    max_closed_age: int = ROOM_CLOSED_PRUNE_SECONDS,
+) -> tuple[RoomEntry, ...]:
+    kept: list[RoomEntry] = []
+    for room in rooms:
+        if room.state != "closed" or room.closed_at_unix is None:
+            kept.append(room)
+            continue
+        if now_unix - room.closed_at_unix >= max_closed_age:
+            continue
+        kept.append(room)
+    return tuple(kept)
 
 
 def _format_open_botc_lines(botc: BotcJoinSnapshot) -> list[str]:

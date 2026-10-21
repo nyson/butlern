@@ -15,7 +15,7 @@ from butler.domains.rsvp.domain import (
     apply_botc_snapshot,
     apply_status_update,
     apply_storyteller_role,
-    close_all_open_rooms,
+    clear_all_rooms,
     close_room,
     prune_stale_closed_rooms,
     remove_room,
@@ -278,7 +278,8 @@ class RsvpController:
         async with self._lock_for(message_id):
             current = self._rooms(view_state)
             if room_id is None:
-                rooms = close_all_open_rooms(current)
+                # Bulk ST action: drop every section and unregister from poll.
+                rooms = clear_all_rooms(current)
             else:
                 rooms = close_room(current, room_id=room_id)
             new_state = view_state.with_rooms(rooms)
@@ -292,6 +293,7 @@ class RsvpController:
         message_id: int | None,
         view_state: ViewState,
     ) -> ViewMutationResult:
+        """Remove all room sections from the RSVP message (stops room polling)."""
         return await self.close_room(
             message_id=message_id,
             view_state=view_state,
@@ -342,16 +344,20 @@ class RsvpController:
                     snapshot=snapshot,
                     now_unix=now_unix,
                 )
+                unchanged = updated is room
                 logger.debug(
-                    "room update state message_id=%s room_id=%s "
-                    "%s -> %s occupancy=%s newly_opened=%s "
-                    "edition=%r phase=%r next_check=%s",
+                    "room pull result message_id=%s room_id=%s "
+                    "%s -> %s occupancy=%s newly_opened=%s unchanged=%s "
+                    "hash_before=%s hash_after=%s edition=%r phase=%r next_check=%s",
                     message_id,
                     room.room_id,
                     room.state,
                     updated.state,
                     snapshot.occupancy,
                     opened,
+                    unchanged,
+                    room.content_hash,
+                    updated.content_hash,
                     snapshot.edition,
                     snapshot.phase,
                     next_check,
@@ -371,16 +377,19 @@ class RsvpController:
                 )
             new_state = view_state.with_rooms(pruned)
             should_render = rooms_require_rerender(before_rooms, pruned)
-            self._write_view_state(message_id=message_id, view_state=new_state)
+            # Persist only when room payloads actually changed (hash/prune/backfill).
+            if pruned != before_rooms:
+                self._write_view_state(message_id=message_id, view_state=new_state)
             render = self._snapshot_unlocked(message_id=message_id, view_state=new_state)
             logger.debug(
                 "room poll applied message_id=%s checked=%s newly_opened=%s "
-                "remaining=%s should_render=%s checked_at=%s next_check=%s",
+                "remaining=%s should_render=%s persisted=%s checked_at=%s next_check=%s",
                 message_id,
                 len(updates),
                 len(newly_opened),
                 len(pruned),
                 should_render,
+                pruned != before_rooms,
                 checked_at.isoformat(),
                 next_check,
             )

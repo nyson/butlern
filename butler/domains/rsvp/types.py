@@ -23,7 +23,11 @@ class RoomEntry:
     source: RoomSource = "manual"
     last_checked_unix: int | None = None
     closed_at_unix: int | None = None
+    # Wall clock when an open room last became empty (0 filled players + 0 STs).
+    empty_since_unix: int | None = None
     botc: BotcJoinSnapshot | None = None
+    # SHA-256 of track fields (state/phase/player count/edition); skip no-op edits.
+    content_hash: str | None = None
 
 
 @dataclass(frozen=True)

@@ -36,6 +36,14 @@ async def fetch_botc_join_snapshot(
     checked_at = datetime.now(UTC)
     next_check = next_room_check_iso(now=checked_at)
     started = time.perf_counter()
+    logger.debug(
+        "room pull start url=%s code=%s room_id=%s message_id=%s next_check=%s",
+        url,
+        code,
+        room_id,
+        message_id,
+        next_check,
+    )
     timeout = aiohttp.ClientTimeout(total=_FETCH_TIMEOUT_SECONDS)
     try:
         async with (
@@ -48,7 +56,7 @@ async def fetch_botc_join_snapshot(
         ):
             if response.status >= 400:
                 logger.warning(
-                    "botc join fetch HTTP %s url=%s room_id=%s message_id=%s "
+                    "room pull HTTP %s url=%s room_id=%s message_id=%s "
                     "next_check=%s",
                     response.status,
                     url,
@@ -58,9 +66,18 @@ async def fetch_botc_join_snapshot(
                 )
                 return None
             html = await response.text(errors="replace")
+            logger.debug(
+                "room pull response url=%s room_id=%s message_id=%s "
+                "http=%s bytes=%s",
+                url,
+                room_id,
+                message_id,
+                response.status,
+                len(html),
+            )
     except (TimeoutError, aiohttp.ClientError, OSError):
         logger.warning(
-            "botc join fetch failed url=%s room_id=%s message_id=%s next_check=%s",
+            "room pull failed url=%s room_id=%s message_id=%s next_check=%s",
             url,
             room_id,
             message_id,
@@ -73,7 +90,7 @@ async def fetch_botc_join_snapshot(
         snapshot = parse_botc_join_html(html, code=code)
     except Exception:
         logger.exception(
-            "botc join parse failed url=%s room_id=%s message_id=%s next_check=%s",
+            "room pull parse failed url=%s room_id=%s message_id=%s next_check=%s",
             url,
             room_id,
             message_id,
@@ -83,7 +100,7 @@ async def fetch_botc_join_snapshot(
 
     elapsed_ms = (time.perf_counter() - started) * 1000.0
     logger.debug(
-        "room check url=%s room_id=%s message_id=%s code=%s occupancy=%s "
+        "room pull ok url=%s room_id=%s message_id=%s code=%s occupancy=%s "
         "open_seats=%s edition=%r phase=%r storytellers=%s players_filled=%s "
         "took_ms=%.1f checked_at=%s next_check=%s",
         url,

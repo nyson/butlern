@@ -21,7 +21,9 @@ from butler.jobs.runtime import (
     set_runtime_scheduler,
 )
 from butler.permissions import guild_sync_access_message
+from butler.rooms.constants import ROOM_POLL_INTERVAL_SECONDS
 from butler.rsvp.controller import RsvpController
+from butler.rsvp.room_poll import refresh_connected_guild_botc_rooms
 from butler.rsvp.view.event_message_view import EventMessageView
 from butler.settings_store import GuildSettingsStore
 
@@ -34,6 +36,7 @@ class BotEventState:
     event_cache_boot_hydrated: bool = False
     commands_synced: bool = False
     event_cache_daily_sync_started: bool = False
+    room_poll_started: bool = False
 
 
 @dataclass(frozen=True)
@@ -182,15 +185,51 @@ async def _handle_on_ready(
         state.event_cache_daily_sync_started = True
         logger.debug("APScheduler event-cache jobs active running=%s", scheduler.running)
 
+    if not state.room_poll_started:
+        async def _room_poll_tick() -> None:
+            logger.debug("Automatic room poll tick starting.")
+            try:
+                summaries = await refresh_connected_guild_botc_rooms(
+                    bot=deps.get_runtime_bot_fn(),
+                    view_store=deps.get_view_store_fn(),
+                    controller=deps.get_controller_fn(),
+                    active_views=deps.get_active_views_fn(),
+                    settings_store=deps.get_settings_store_fn(),
+                )
+            except Exception:
+                logger.exception("Automatic room poll tick failed.")
+                return
+            edited = sum(item.messages_edited for item in summaries)
+            checked = sum(item.rooms_checked for item in summaries)
+            logger.debug(
+                "Automatic room poll tick done guilds=%s rooms_checked=%s edited=%s",
+                len(summaries),
+                checked,
+                edited,
+            )
+
+        scheduler.start()
+        scheduler.ensure_room_poll_job(
+            _room_poll_tick,
+            seconds=ROOM_POLL_INTERVAL_SECONDS,
+        )
+        state.room_poll_started = True
+        logger.debug(
+            "Room poll job registered interval_s=%.0f scheduler=%s",
+            ROOM_POLL_INTERVAL_SECONDS,
+            scheduler.running,
+        )
+
     if runtime_bot.user is not None:
         logger.info(
             "Butler ready as %s (ID: %s); rsvp_hydrated=%s event_cache=%s "
-            "commands_synced=%s scheduler=%s",
+            "commands_synced=%s room_poll=%s scheduler=%s",
             runtime_bot.user,
             runtime_bot.user.id,
             state.rsvp_views_hydrated,
             state.event_cache_boot_hydrated,
             state.commands_synced,
+            state.room_poll_started,
             scheduler.running,
         )
 

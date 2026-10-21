@@ -40,7 +40,9 @@ def room_to_dict(room: RoomEntry) -> dict[str, Any]:
         "source": room.source,
         "last_checked_unix": room.last_checked_unix,
         "closed_at_unix": room.closed_at_unix,
+        "empty_since_unix": room.empty_since_unix,
         "botc": None if room.botc is None else botc_to_dict(room.botc),
+        "content_hash": room.content_hash,
     }
 
 
@@ -56,6 +58,7 @@ def room_from_dict(data: dict[str, Any]) -> RoomEntry | None:
     source: RoomSource = "polled" if source_raw == "polled" else "manual"
     botc_raw = data.get("botc")
     botc = botc_from_dict(botc_raw) if isinstance(botc_raw, dict) else None
+    content_hash_raw = data.get("content_hash")
     return RoomEntry(
         room_id=room_id,
         url=url,
@@ -64,7 +67,9 @@ def room_from_dict(data: dict[str, Any]) -> RoomEntry | None:
         source=source,
         last_checked_unix=_optional_int(data.get("last_checked_unix")),
         closed_at_unix=_optional_int(data.get("closed_at_unix")),
+        empty_since_unix=_optional_int(data.get("empty_since_unix")),
         botc=botc,
+        content_hash=content_hash_raw if isinstance(content_hash_raw, str) else None,
     )
 
 

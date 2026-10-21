@@ -180,7 +180,7 @@ def _rooms_on_view(view: EventMessageView) -> tuple[RoomEntry, ...]:
 
 
 class RoomActions(ui.ActionRow["EventMessageView"]):
-    """Storyteller row: add room + close all open rooms."""
+    """Storyteller row: add room + remove all room sections."""
 
     def __init__(self, root: EventMessageView) -> None:
         super().__init__()
@@ -711,6 +711,7 @@ class EventMessageView(ui.LayoutView):
                 await self._reply_service_error(interaction, error, deferred=True)
 
     async def close_all_rooms(self, interaction: discord.Interaction) -> None:
+        """Remove every room section and unregister rooms from polling."""
         role_id = self.event_manager_role_id(interaction)
         if not can_manage_room_action(interaction, event_manager_role_id=role_id):
             await interaction.response.send_message(

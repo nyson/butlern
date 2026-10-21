@@ -225,45 +225,64 @@ async def _poll_one_stored_message(
     all_rooms = _rooms_for_state(view)
     if not _botc_rooms(all_rooms):
         return _MessagePollOutcome(skipped="no_botc")
+
     pull_rooms = _rooms_to_pull(all_rooms, now_unix=now_unix)
-    if not pull_rooms:
-        return _MessagePollOutcome(skipped="inactive")
+    newly_opened_count = 0
+    rooms_checked = 0
+    rooms_failed = 0
 
-    updates, failed = await _fetch_updates_for_rooms(
-        pull_rooms,
-        message_id=stored.message_id,
-        snapshot_by_url=snapshot_by_url,
-    )
-    if not updates:
-        return _MessagePollOutcome(
-            with_botc=True,
-            rooms_checked=len(pull_rooms),
-            rooms_failed=failed,
+    if pull_rooms:
+        updates, failed = await _fetch_updates_for_rooms(
+            pull_rooms,
+            message_id=stored.message_id,
+            snapshot_by_url=snapshot_by_url,
         )
+        rooms_checked = len(pull_rooms)
+        rooms_failed = failed
+        if updates:
+            new_state, render, newly_opened, should_render = (
+                await controller.apply_room_poll_results(
+                    message_id=stored.message_id,
+                    view_state=view.view_state,
+                    updates=updates,
+                    now_unix=now_unix,
+                )
+            )
+            newly_opened_count = len(newly_opened)
+        else:
+            # Still drop stale closed sections even when fetches fail.
+            new_state, render, should_render = await controller.prune_closed_rooms(
+                message_id=stored.message_id,
+                view_state=view.view_state,
+                now_unix=now_unix,
+            )
+    else:
+        # No active pulls: prune closed sections that aged out (5 min).
+        new_state, render, should_render = await controller.prune_closed_rooms(
+            message_id=stored.message_id,
+            view_state=view.view_state,
+            now_unix=now_unix,
+        )
+        if not should_render:
+            return _MessagePollOutcome(skipped="inactive")
 
-    new_state, render, newly_opened, should_render = await controller.apply_room_poll_results(
-        message_id=stored.message_id,
-        view_state=view.view_state,
-        updates=updates,
-        now_unix=now_unix,
-    )
     view.view_state = new_state
     logger.debug(
-        "room pull applied message_id=%s fetched=%s failed=%s "
+        "room pull applied message_id=%s checked=%s failed=%s "
         "rooms_after=%s newly_opened=%s should_render=%s",
         stored.message_id,
-        len(updates),
-        failed,
+        rooms_checked,
+        rooms_failed,
         len(new_state.rooms),
-        len(newly_opened),
+        newly_opened_count,
         should_render,
     )
     if not should_render:
         return _MessagePollOutcome(
             with_botc=True,
-            rooms_checked=len(pull_rooms),
-            rooms_failed=failed,
-            newly_opened=len(newly_opened),
+            rooms_checked=rooms_checked,
+            rooms_failed=rooms_failed,
+            newly_opened=newly_opened_count,
         )
 
     # One Discord edit covers every room section on this RSVP message.
@@ -293,9 +312,9 @@ async def _poll_one_stored_message(
 
     return _MessagePollOutcome(
         with_botc=True,
-        rooms_checked=len(pull_rooms),
-        rooms_failed=failed,
-        newly_opened=len(newly_opened),
+        rooms_checked=rooms_checked,
+        rooms_failed=rooms_failed,
+        newly_opened=newly_opened_count,
         edited=edited,
     )
 

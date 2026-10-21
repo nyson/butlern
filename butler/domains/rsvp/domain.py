@@ -351,12 +351,19 @@ def prune_stale_closed_rooms(
     now_unix: int,
     max_closed_age: int = ROOM_CLOSED_PRUNE_SECONDS,
 ) -> tuple[RoomEntry, ...]:
+    """Drop closed room sections past max age (untracks them from poll)."""
     kept: list[RoomEntry] = []
     for room in rooms:
-        if room.state != "closed" or room.closed_at_unix is None:
+        if room.state != "closed":
             kept.append(room)
             continue
-        if now_unix - room.closed_at_unix >= max_closed_age:
+        closed_at = room.closed_at_unix
+        if closed_at is None:
+            closed_at = room.last_checked_unix
+        if closed_at is None:
+            # Unknown close time: treat as already stale so the section goes away.
+            continue
+        if now_unix - closed_at >= max_closed_age:
             continue
         kept.append(room)
     return tuple(kept)

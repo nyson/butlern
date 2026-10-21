@@ -9,8 +9,11 @@ ROOM_POLL_INTERVAL_SECONDS: Final[float] = 60.0
 # Open room with 0 players and 0 storytellers for this long is abandoned.
 ROOM_EMPTY_ABANDON_SECONDS: Final[int] = 5 * 60
 
-# Closed rooms older than this are not re-pulled (no reopen watch).
-ROOM_REOPEN_WATCH_SECONDS: Final[int] = 6 * 60 * 60
+# Closed room sections are removed from RSVP + poll after this long.
+ROOM_CLOSED_PRUNE_SECONDS: Final[int] = 5 * 60
+
+# Closed rooms are re-pulled only while still visible (reopen watch).
+ROOM_REOPEN_WATCH_SECONDS: Final[int] = ROOM_CLOSED_PRUNE_SECONDS
 
 # Pause between Discord message edits in a poll batch (channel sub-ratelimit).
 ROOM_DISCORD_EDIT_GAP_SECONDS: Final[float] = 1.0

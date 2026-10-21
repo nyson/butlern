@@ -314,6 +314,30 @@ class RsvpController:
             snapshot = self._snapshot_unlocked(message_id=message_id, view_state=new_state)
             return ok((new_state, snapshot))
 
+    async def prune_closed_rooms(
+        self,
+        *,
+        message_id: int,
+        view_state: ViewState,
+        now_unix: int,
+    ) -> tuple[ViewState, RsvpRenderSnapshot, bool]:
+        """Remove stale closed sections without fetching botc pages."""
+        async with self._lock_for(message_id):
+            current = self._rooms(view_state)
+            pruned = prune_stale_closed_rooms(current, now_unix=now_unix)
+            should_render = rooms_require_rerender(current, pruned)
+            new_state = view_state.with_rooms(pruned)
+            if pruned != current:
+                self._write_view_state(message_id=message_id, view_state=new_state)
+                logger.debug(
+                    "room prune closed sections message_id=%s before=%s after=%s",
+                    message_id,
+                    len(current),
+                    len(pruned),
+                )
+            render = self._snapshot_unlocked(message_id=message_id, view_state=new_state)
+            return new_state, render, should_render
+
     async def apply_room_poll_results(
         self,
         *,

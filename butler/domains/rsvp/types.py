@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from butler.rooms.constants import ROOM_CLOSED_PRUNE_SECONDS
 from butler.rooms.types import BotcJoinSnapshot
 
 RsvpRole = Literal["Player", "Storyteller"]
@@ -11,7 +12,17 @@ RoomState = Literal["pending", "open", "closed"]
 RoomButton = Literal["open_or_prompt", "close", "close_all", "remove"]
 RoomSource = Literal["manual", "polled"]
 
-ROOM_CLOSED_PRUNE_SECONDS: int = 60 * 60
+__all__ = [
+    "ROOM_CLOSED_PRUNE_SECONDS",
+    "RoomButton",
+    "RoomEntry",
+    "RoomSource",
+    "RoomState",
+    "RsvpRole",
+    "RsvpStatus",
+    "ViewState",
+    "rooms_from_legacy",
+]
 
 
 @dataclass(frozen=True)

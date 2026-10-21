@@ -478,6 +478,26 @@ async def test_room_actions_visibility_pending_vs_open(
             )
     assert per_room_labels == ["Stäng"]
 
+    closed_result = await controller.close_room(
+        message_id=None,
+        view_state=new_state,
+        room_id=new_state.rooms[0].room_id,
+    )
+    assert isinstance(closed_result, Ok)
+    closed_state, closed_snap = closed_result.value
+    view.view_state = closed_state
+    view.apply_snapshot(closed_snap)
+    closed_container = next(
+        child for child in view.children if isinstance(child, discord.ui.Container)
+    )
+    closed_labels: list[str] = []
+    for item in closed_container.children:
+        if isinstance(item, discord.ui.ActionRow):
+            closed_labels.extend(
+                cast(str, cast(Any, btn).label) for btn in item.children
+            )
+    assert closed_labels == ["Stäng"]
+
 
 async def test_view_bind_message_context_persists(
     controller: RsvpController,

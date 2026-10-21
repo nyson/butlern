@@ -8,6 +8,7 @@ from discord.ext import commands
 
 import butler.admin_command as admin_command
 import butler.bot_events as bot_events
+import butler.rooms_command as rooms_command
 import butler.rsvp.event_command as rsvp_event_command
 import butler.settings_command as settings_command
 from butler.config import load_config
@@ -20,6 +21,8 @@ from butler.design import (
     EVENT_OPTION_DESCRIPTION,
     ONBOARDING_MESSAGE,
     REHYDRATE_COMMAND_DESCRIPTION,
+    ROOMS_GROUP_DESCRIPTION,
+    ROOMS_UPDATE_SUBCOMMAND_DESCRIPTION,
 )
 from butler.discord_events import BOTC_EDITION_CHOICES
 from butler.discord_helpers import (
@@ -193,6 +196,29 @@ async def seteventrole(
 @app_commands.default_permissions(manage_guild=True)
 async def rehydrate(interaction: discord.Interaction) -> None:
     await admin_command.handle_rehydrate_command(interaction=interaction)
+
+
+rooms_group = app_commands.Group(
+    name="rooms",
+    description=ROOMS_GROUP_DESCRIPTION,
+    guild_only=True,
+    default_permissions=discord.Permissions(manage_guild=True),
+)
+
+
+@rooms_group.command(name="update", description=ROOMS_UPDATE_SUBCOMMAND_DESCRIPTION)
+async def rooms_update(interaction: discord.Interaction) -> None:
+    await rooms_command.handle_rooms_update_command(
+        interaction=interaction,
+        bot=bot,
+        view_store=RSVP_MESSAGE_STORE,
+        controller=RSVP_CONTROLLER,
+        active_views=ACTIVE_RSVP_VIEWS,
+        settings_store=SETTINGS_STORE,
+    )
+
+
+bot.tree.add_command(rooms_group)
 
 
 def main(*, force_guild_sync: bool = False, log_level: int | None = None) -> None:

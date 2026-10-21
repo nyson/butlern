@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Final
 
 # How often botc join pages are re-checked for attached RSVP rooms.
-ROOM_POLL_INTERVAL_SECONDS: Final[float] = 300.0
+ROOM_POLL_INTERVAL_SECONDS: Final[float] = 60.0
 
 
 def next_room_check_iso(*, now: datetime | None = None) -> str:

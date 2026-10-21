@@ -190,6 +190,35 @@ def apply_botc_snapshot(
     return replace(room, last_checked_unix=now_unix), False
 
 
+def room_display_signature(room: RoomEntry) -> tuple[object, ...]:
+    """Fields that affect the Discord room section (text + controls), not poll metadata."""
+    botc = room.botc
+    if botc is None:
+        botc_key: tuple[object, ...] = ()
+    else:
+        botc_key = (
+            botc.occupancy,
+            botc.edition,
+            botc.phase,
+            botc.player_count,
+            tuple((person.name, person.is_empty_seat) for person in botc.storytellers),
+            tuple((person.name, person.is_empty_seat) for person in botc.players),
+        )
+    return (room.room_id, room.url, room.state, room.label, botc_key)
+
+
+def rooms_display_signature(rooms: Sequence[RoomEntry]) -> tuple[tuple[object, ...], ...]:
+    return tuple(room_display_signature(room) for room in rooms)
+
+
+def rooms_require_rerender(
+    before: Sequence[RoomEntry],
+    after: Sequence[RoomEntry],
+) -> bool:
+    """True when Discord room sections would look/behave differently."""
+    return rooms_display_signature(before) != rooms_display_signature(after)
+
+
 def prune_stale_closed_rooms(
     rooms: Sequence[RoomEntry],
     *,

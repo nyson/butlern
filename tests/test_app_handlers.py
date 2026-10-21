@@ -228,6 +228,59 @@ async def test_rehydrate_reports_failure(
     assert "rehydrate failed" in sent_text(ix.followup.send)
 
 
+# --- /rooms update -----------------------------------------------------------
+
+
+async def test_rooms_update_requires_guild() -> None:
+    ix = make_interaction(guild=None)
+    await invoke(app.rooms_update, ix.interaction)
+    assert "must be used in a server" in sent_text(ix.response.send_message)
+
+
+async def test_rooms_update_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    import butler.rooms_command as rooms_command
+    from butler.rsvp.room_poll import RoomPollSummary
+
+    refresh = AsyncMock(
+        return_value=RoomPollSummary(
+            messages_seen=2,
+            messages_with_botc_rooms=1,
+            rooms_checked=3,
+            rooms_failed=0,
+            messages_edited=1,
+            newly_opened=1,
+            elapsed_ms=42.0,
+        )
+    )
+    monkeypatch.setattr(rooms_command, "refresh_guild_botc_rooms", refresh)
+
+    guild = make_guild(guild_id=42)
+    ix = make_interaction(guild=guild)
+    await invoke(app.rooms_update, ix.interaction)
+
+    ix.response.defer.assert_awaited_once()
+    refresh.assert_awaited_once()
+    assert refresh.await_args is not None
+    assert refresh.await_args.kwargs["guild_id"] == 42
+    text = sent_text(ix.followup.send)
+    assert "Rums-uppdatering klar" in text
+    assert "rooms_checked=3" in text
+    assert "newly_opened=1" in text
+
+
+async def test_rooms_update_reports_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    import butler.rooms_command as rooms_command
+
+    refresh = AsyncMock(side_effect=RuntimeError("fetch exploded"))
+    monkeypatch.setattr(rooms_command, "refresh_guild_botc_rooms", refresh)
+
+    ix = make_interaction(guild=make_guild(guild_id=7))
+    await invoke(app.rooms_update, ix.interaction)
+
+    refresh.assert_awaited_once()
+    assert "Kunde inte uppdatera rummen" in sent_text(ix.followup.send)
+
+
 # --- /event -----------------------------------------------------------------
 
 

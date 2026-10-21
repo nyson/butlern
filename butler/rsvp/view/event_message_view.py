@@ -219,37 +219,37 @@ class RoomActions(ui.ActionRow["EventMessageView"]):
         await self.root.close_all_rooms(interaction)
 
 
-class CloseRoomButton(ui.Button["EventMessageView"]):
-    """Close one open room (lives on that room's action row)."""
+class DismissRoomSectionButton(ui.Button["EventMessageView"]):
+    """Dismiss one room section from the RSVP message (not room open/closed state)."""
 
     def __init__(self, *, root: EventMessageView, room: RoomEntry) -> None:
         super().__init__(
             label="Stäng",
             emoji=ROOM_CLOSE_BUTTON_EMOJI,
             style=discord.ButtonStyle.danger,
-            custom_id=f"butler:rsvp:close-room:{room.room_id}",
+            custom_id=f"butler:rsvp:dismiss-room-section:{room.room_id}",
         )
         self.root = root
         self.room_id = room.room_id
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        await self.root.close_room(interaction, room_id=self.room_id)
+        await self.root.dismiss_room_section(interaction, room_id=self.room_id)
 
 
 class RoomItemActions(ui.ActionRow["EventMessageView"]):
-    """Action row bound to a single open room (Stäng only)."""
+    """Action row on a room section (Stäng dismisses the section)."""
 
     def __init__(self, root: EventMessageView, room: RoomEntry) -> None:
         super().__init__()
         self.root = root
-        self.add_item(CloseRoomButton(root=root, room=room))
+        self.add_item(DismissRoomSectionButton(root=root, room=room))
 
 
 def build_room_container(
     root: EventMessageView,
     room: RoomEntry,
 ) -> ui.Container[EventMessageView]:
-    """One Discord Container: room section text + optional close row."""
+    """One Discord Container: room section text + Stäng (open or closed)."""
     if room.state == "open":
         accent = discord.Colour.green()
     elif room.state == "closed":
@@ -260,7 +260,8 @@ def build_room_container(
     children: list[ui.Item[EventMessageView]] = [
         ui.TextDisplay(format_room_block(room)),
     ]
-    if room.state == "open":
+    # Stäng removes this section from the message; room open/close is separate.
+    if room.state in {"open", "closed"}:
         children.append(RoomItemActions(root, room))
     return ui.Container(*children, accent_colour=accent)
 
@@ -640,6 +641,32 @@ class EventMessageView(ui.LayoutView):
                         user_ids=self.user_ids_for_statuses(("Available", "Maybe")),
                         message_link=interaction.message.jump_url,
                     )
+            case Err(error):
+                await self._reply_service_error(interaction, error, deferred=True)
+
+    async def dismiss_room_section(
+        self,
+        interaction: discord.Interaction,
+        *,
+        room_id: str,
+    ) -> None:
+        """Remove one room section from the RSVP message (decouple)."""
+        role_id = self.event_manager_role_id(interaction)
+        if not can_manage_room_action(interaction, event_manager_role_id=role_id):
+            await interaction.response.send_message(
+                room_permission_denied_message(interaction, event_manager_role_id=role_id),
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer(thinking=False)
+        result = await self.controller.remove_room(
+            message_id=self.message_id,
+            view_state=self.view_state,
+            room_id=room_id,
+        )
+        match result:
+            case Ok((_new_state, snapshot)):
+                await self.apply_and_edit(interaction, snapshot)
             case Err(error):
                 await self._reply_service_error(interaction, error, deferred=True)
 

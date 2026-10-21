@@ -19,6 +19,7 @@ from butler.domains.rsvp.domain import (
     close_room,
     prune_stale_closed_rooms,
     remove_room,
+    rooms_require_rerender,
 )
 from butler.domains.rsvp.store import RsvpMessageStore
 from butler.domains.rsvp.types import RoomEntry, RsvpStatus, ViewState, rooms_from_legacy
@@ -318,12 +319,19 @@ class RsvpController:
         view_state: ViewState,
         updates: dict[str, BotcJoinSnapshot],
         now_unix: int,
-    ) -> tuple[ViewState, RsvpRenderSnapshot, tuple[RoomEntry, ...]]:
-        """Apply botc snapshots; return state, snapshot, newly opened rooms."""
+    ) -> tuple[ViewState, RsvpRenderSnapshot, tuple[RoomEntry, ...], bool]:
+        """Apply botc snapshots; return state, snapshot, newly opened, should_render.
+
+        Fetch/persist is independent of Discord rendering: ``should_render`` is True
+        only when visible room section content changed (not mere last_checked stamps).
+        """
         async with self._lock_for(message_id):
             current = list(self._rooms(view_state))
+            before_rooms = tuple(current)
             newly_opened: list[RoomEntry] = []
             next_rooms: list[RoomEntry] = []
+            checked_at = datetime.fromtimestamp(now_unix, tz=UTC)
+            next_check = next_room_check_iso(now=checked_at)
             for room in current:
                 snapshot = updates.get(room.room_id)
                 if snapshot is None:
@@ -334,25 +342,49 @@ class RsvpController:
                     snapshot=snapshot,
                     now_unix=now_unix,
                 )
+                logger.debug(
+                    "room update state message_id=%s room_id=%s "
+                    "%s -> %s occupancy=%s newly_opened=%s "
+                    "edition=%r phase=%r next_check=%s",
+                    message_id,
+                    room.room_id,
+                    room.state,
+                    updated.state,
+                    snapshot.occupancy,
+                    opened,
+                    snapshot.edition,
+                    snapshot.phase,
+                    next_check,
+                )
                 next_rooms.append(updated)
                 if opened:
                     newly_opened.append(updated)
             pruned = prune_stale_closed_rooms(next_rooms, now_unix=now_unix)
+            if len(pruned) != len(next_rooms):
+                logger.debug(
+                    "room update pruned closed rooms message_id=%s before=%s after=%s "
+                    "next_check=%s",
+                    message_id,
+                    len(next_rooms),
+                    len(pruned),
+                    next_check,
+                )
             new_state = view_state.with_rooms(pruned)
+            should_render = rooms_require_rerender(before_rooms, pruned)
             self._write_view_state(message_id=message_id, view_state=new_state)
             render = self._snapshot_unlocked(message_id=message_id, view_state=new_state)
-            checked_at = datetime.fromtimestamp(now_unix, tz=UTC)
-            next_check = next_room_check_iso(now=checked_at)
             logger.debug(
                 "room poll applied message_id=%s checked=%s newly_opened=%s "
-                "remaining=%s next_check=%s",
+                "remaining=%s should_render=%s checked_at=%s next_check=%s",
                 message_id,
                 len(updates),
                 len(newly_opened),
                 len(pruned),
+                should_render,
+                checked_at.isoformat(),
                 next_check,
             )
-            return new_state, render, tuple(newly_opened)
+            return new_state, render, tuple(newly_opened), should_render
 
     async def update_linked_event(
         self,

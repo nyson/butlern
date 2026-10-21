@@ -251,14 +251,14 @@ async def _poll_one_stored_message(
             newly_opened_count = len(newly_opened)
         else:
             # Still drop stale closed sections even when fetches fail.
-            new_state, render, should_render = await controller.prune_closed_rooms(
+            new_state, render, should_render, _removed = await controller.prune_closed_rooms(
                 message_id=stored.message_id,
                 view_state=view.view_state,
                 now_unix=now_unix,
             )
     else:
         # No active pulls: prune closed sections that aged out (5 min).
-        new_state, render, should_render = await controller.prune_closed_rooms(
+        new_state, render, should_render, _removed = await controller.prune_closed_rooms(
             message_id=stored.message_id,
             view_state=view.view_state,
             now_unix=now_unix,

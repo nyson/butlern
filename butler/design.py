@@ -207,6 +207,9 @@ ROOMS_UPDATE_SUBCOMMAND_DESCRIPTION: Final[str] = (
     "Hämta om status för alla botc.app-rum i den här servern"
 )
 ROOMS_UPDATE_GUILD_ONLY_MESSAGE: Final[str] = "This command must be used in a server."
+ROOMS_UPDATE_PERMISSION_DENIED_MESSAGE: Final[str] = (
+    f"Du behöver behörigheten {MANAGE_SERVER_PERMISSION_LABEL} för att uppdatera rum."
+)
 ROOMS_UPDATE_FAILED_MESSAGE: Final[str] = (
     "Kunde inte uppdatera rummen. Kolla botloggarna och försök igen."
 )
@@ -215,6 +218,17 @@ ROOMS_UPDATE_SUCCESS_TEMPLATE: Final[str] = (
     "rsvp_messages={messages_seen}, with_botc={messages_with_botc_rooms}, "
     "rooms_checked={rooms_checked}, rooms_failed={rooms_failed}, "
     "messages_edited={messages_edited}, newly_opened={newly_opened}."
+)
+ROOMS_PRUNE_SUBCOMMAND_DESCRIPTION: Final[str] = (
+    "Ta bort stängda rumsektioner från RSVP-inlägg i den här servern"
+)
+ROOMS_PRUNE_FAILED_MESSAGE: Final[str] = (
+    "Kunde inte rensa stängda rum. Kolla botloggarna och försök igen."
+)
+ROOMS_PRUNE_SUCCESS_TEMPLATE: Final[str] = (
+    "Rensning av stängda rum klar på {elapsed_ms:.0f}ms.\n"
+    "rsvp_messages={messages_seen}, with_closed={messages_with_closed}, "
+    "rooms_removed={rooms_removed}, messages_edited={messages_edited}."
 )
 ROOM_OPENED_WITH_MENTIONS_TEMPLATE: Final[str] = (
     "Rummet är öppet! {mentions}\n"

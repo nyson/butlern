@@ -22,6 +22,7 @@ from butler.design import (
     ONBOARDING_MESSAGE,
     REHYDRATE_COMMAND_DESCRIPTION,
     ROOMS_GROUP_DESCRIPTION,
+    ROOMS_PRUNE_SUBCOMMAND_DESCRIPTION,
     ROOMS_UPDATE_SUBCOMMAND_DESCRIPTION,
 )
 from butler.discord_events import BOTC_EDITION_CHOICES
@@ -207,8 +208,22 @@ rooms_group = app_commands.Group(
 
 
 @rooms_group.command(name="update", description=ROOMS_UPDATE_SUBCOMMAND_DESCRIPTION)
+@app_commands.default_permissions(manage_guild=True)
 async def rooms_update(interaction: discord.Interaction) -> None:
     await rooms_command.handle_rooms_update_command(
+        interaction=interaction,
+        bot=bot,
+        view_store=RSVP_MESSAGE_STORE,
+        controller=RSVP_CONTROLLER,
+        active_views=ACTIVE_RSVP_VIEWS,
+        settings_store=SETTINGS_STORE,
+    )
+
+
+@rooms_group.command(name="prune", description=ROOMS_PRUNE_SUBCOMMAND_DESCRIPTION)
+@app_commands.default_permissions(manage_guild=True)
+async def rooms_prune(interaction: discord.Interaction) -> None:
+    await rooms_command.handle_rooms_prune_command(
         interaction=interaction,
         bot=bot,
         view_store=RSVP_MESSAGE_STORE,

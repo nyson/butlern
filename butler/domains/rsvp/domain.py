@@ -177,6 +177,11 @@ def clear_all_rooms(rooms: Sequence[RoomEntry]) -> tuple[RoomEntry, ...]:
     return ()
 
 
+def remove_closed_rooms(rooms: Sequence[RoomEntry]) -> tuple[RoomEntry, ...]:
+    """Drop every closed room section immediately (manual prune)."""
+    return tuple(room for room in rooms if room.state != "closed")
+
+
 def format_room_section(rooms: Sequence[RoomEntry]) -> str | None:
     if not rooms:
         return None

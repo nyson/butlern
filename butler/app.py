@@ -194,9 +194,11 @@ async def seteventrole(
     description=REHYDRATE_COMMAND_DESCRIPTION,
 )
 @app_commands.guild_only()
-@app_commands.default_permissions(manage_guild=True)
 async def rehydrate(interaction: discord.Interaction) -> None:
-    await admin_command.handle_rehydrate_command(interaction=interaction)
+    await admin_command.handle_rehydrate_command(
+        interaction=interaction,
+        settings_store=SETTINGS_STORE,
+    )
 
 
 rooms_group = app_commands.Group(

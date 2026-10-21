@@ -9,24 +9,42 @@ from butler.caches.events.option_cache import (
     AUTOCOMPLETE_EVENT_CACHE,
     event_option_cache_is_fresh,
 )
-from butler.command_helpers import defer_thinking_response
+from butler.command_helpers import (
+    configured_event_manager_role_id,
+    defer_thinking_response,
+    ensure_member_can_manage_events_for_command,
+    resolve_event_command_context,
+)
 from butler.design import (
     REHYDRATE_FAILED_MESSAGE,
-    REHYDRATE_GUILD_ONLY_MESSAGE,
     REHYDRATE_SUCCESS_TEMPLATE,
 )
+from butler.settings_store import GuildSettingsStore
 
 logger = logging.getLogger(__name__)
 
 
-async def handle_rehydrate_command(*, interaction: discord.Interaction) -> None:
+async def handle_rehydrate_command(
+    *,
+    interaction: discord.Interaction,
+    settings_store: GuildSettingsStore,
+) -> None:
     """Force-warm the scheduled-event option cache for the current guild."""
-    guild = interaction.guild
-    if guild is None:
-        await interaction.response.send_message(
-            REHYDRATE_GUILD_ONLY_MESSAGE,
-            ephemeral=True,
-        )
+    event_context = await resolve_event_command_context(interaction)
+    if event_context is None:
+        return
+    guild, invoking_member = event_context
+
+    event_manager_role_id = configured_event_manager_role_id(
+        settings_store=settings_store,
+        guild_id=guild.id,
+    )
+    if not await ensure_member_can_manage_events_for_command(
+        interaction=interaction,
+        guild=guild,
+        member=invoking_member,
+        event_manager_role_id=event_manager_role_id,
+    ):
         return
 
     deferred = await defer_thinking_response(interaction)

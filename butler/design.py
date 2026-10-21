@@ -187,9 +187,6 @@ ONBOARDING_MESSAGE: Final[str] = (
 REHYDRATE_COMMAND_DESCRIPTION: Final[str] = (
     "Force-refresh this server's Discord event autocomplete cache"
 )
-REHYDRATE_GUILD_ONLY_MESSAGE: Final[str] = (
-    "This command must be used in a server."
-)
 REHYDRATE_FAILED_MESSAGE: Final[str] = (
     "Event cache rehydrate failed. Check bot logs; a delayed retry may still run."
 )

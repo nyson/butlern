@@ -183,9 +183,56 @@ async def test_seteventrole_save_failure(store: MagicMock) -> None:
 
 
 async def test_rehydrate_requires_guild() -> None:
-    ix = make_interaction(guild=None)
+    ix = make_interaction(guild=None, user=make_member())
     await invoke(app.rehydrate, ix.interaction)
     assert "must be used in a server" in sent_text(ix.response.send_message)
+
+
+async def test_rehydrate_requires_member() -> None:
+    non_member = MagicMock(spec=discord.User)
+    ix = make_interaction(guild=make_guild(guild_id=1), user=non_member)
+    await invoke(app.rehydrate, ix.interaction)
+    assert "verify your server member permissions" in sent_text(ix.response.send_message)
+
+
+async def test_rehydrate_permission_denied(store: MagicMock) -> None:
+    # Same gate as /event: no manage_guild and no configured role -> denied.
+    _ = store
+    ix = make_interaction(
+        guild=make_guild(guild_id=1),
+        user=make_member(permissions=make_permissions(manage_guild=False)),
+    )
+    await invoke(app.rehydrate, ix.interaction)
+    assert "behörigheten" in sent_text(ix.response.send_message)
+
+
+async def test_rehydrate_allows_event_manager_role(
+    store: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import butler.admin_command as admin_command
+    from butler.caches.events import EventCacheWarmResult
+
+    store.get_event_manager_role_id.return_value = 55
+    guild = make_guild(guild_id=42)
+    warm = AsyncMock(
+        return_value=EventCacheWarmResult(
+            warmed=1, empty=0, skipped=0, failed=0, elapsed_ms=12.5
+        )
+    )
+    monkeypatch.setattr(admin_command, "warmup_connected_event_cache", warm)
+
+    ix = make_interaction(
+        guild=guild,
+        user=make_member(
+            permissions=make_permissions(manage_guild=False),
+            role_ids=(55,),
+        ),
+    )
+    await invoke(app.rehydrate, ix.interaction)
+
+    warm.assert_awaited_once_with(guilds=[guild], force=True)
+    assert "rehydrate finished" in sent_text(ix.followup.send)
 
 
 async def test_rehydrate_success_force_warms_current_guild(
@@ -202,7 +249,7 @@ async def test_rehydrate_success_force_warms_current_guild(
     )
     monkeypatch.setattr(admin_command, "warmup_connected_event_cache", warm)
 
-    ix = make_interaction(guild=guild)
+    ix = make_interaction(guild=guild, user=make_member())
     await invoke(app.rehydrate, ix.interaction)
 
     ix.response.defer.assert_awaited_once()
@@ -221,7 +268,7 @@ async def test_rehydrate_reports_failure(
     warm = AsyncMock(side_effect=RuntimeError("list exploded"))
     monkeypatch.setattr(admin_command, "warmup_connected_event_cache", warm)
 
-    ix = make_interaction(guild=make_guild(guild_id=7))
+    ix = make_interaction(guild=make_guild(guild_id=7), user=make_member())
     await invoke(app.rehydrate, ix.interaction)
 
     warm.assert_awaited_once()

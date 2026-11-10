@@ -479,7 +479,7 @@ async def test_room_actions_visibility_pending_vs_open(
             per_room_labels.extend(
                 cast(str, cast(Any, btn).label) for btn in item.children
             )
-    assert per_room_labels == ["Stäng"]
+    assert per_room_labels == ["Annonsera", "Stäng"]
 
     closed_result = await controller.close_room(
         message_id=None,

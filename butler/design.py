@@ -177,10 +177,54 @@ ROOM_LINK_MODAL_MAX_LENGTH: Final[int] = 250
 ROOM_LINK_MODAL_INVALID_MESSAGE: Final[str] = (
     "Ogiltig länk. Använd en fullständig URL som börjar med http:// eller https://."
 )
+ROOM_LINK_MESSAGE_LABEL: Final[str] = "Meddelande (valfritt)"
+ROOM_LINK_MESSAGE_PLACEHOLDER: Final[str] = "T.ex. Vi startar om 5 min"
+ROOM_LINK_MESSAGE_MAX_LENGTH: Final[int] = 200
+ROOM_LINK_PING_SELECT_LABEL: Final[str] = "Pinga"
+ROOM_LINK_PING_SELECT_DESCRIPTION: Final[str] = "Vem ska pingas i announce-kanalen?"
+ROOM_LINK_PING_NONE_LABEL: Final[str] = "Pinga inte"
+ROOM_LINK_PING_RSVP_LABEL: Final[str] = "Pinga kvällens uppskrivna"
+ROOM_LINK_PING_RSVP_DESCRIPTION: Final[str] = "Available + Maybe på RSVP:n"
+ROOM_LINK_PING_PLAYERS_LABEL: Final[str] = "Pinga alla @Spelare"
+# Guild role pinged by "Pinga alla @Spelare" (matched by name, case-insensitive).
+PLAYER_ROLE_NAME: Final[str] = "Spelare"
+PLAYER_ROLE_MISSING_MESSAGE: Final[str] = (
+    "Hittade ingen roll som heter @Spelare, så annonsen skickades utan ping."
+)
+
+ROOM_ANNOUNCE_BUTTON_LABEL: Final[str] = "Annonsera"
+ROOM_ANNOUNCE_BUTTON_EMOJI: Final[str] = "📣"
+ROOM_ANNOUNCE_MODAL_TITLE: Final[str] = "Annonsera rum"
+ROOM_ANNOUNCE_MODAL_LINK_TEMPLATE: Final[str] = "**Rumslänk:** {room_url}"
+ROOM_ANNOUNCE_ROOM_GONE_MESSAGE: Final[str] = "Rummet är inte längre öppet."
 
 ONBOARDING_MESSAGE: Final[str] = (
-    "Tack för att du lade till Butler! Ställ in standardkanalen för event med "
-    "`/seteventchannel` så att inläggen hamnar rätt. Du kan ändra det senare."
+    "Tack för att du lade till Butler! Öppna `/butler settings` och välj eventkanal "
+    "(och gärna announce-kanal + eventroll) så att inläggen hamnar rätt."
+)
+
+# /butler settings — centralized guild configuration modal
+BUTLER_GROUP_DESCRIPTION: Final[str] = "Butler-administration"
+SETTINGS_COMMAND_DESCRIPTION: Final[str] = (
+    "Öppna Butlerns guild-inställningar (kanaler och eventroll)"
+)
+SETTINGS_MODAL_TITLE: Final[str] = "Butler-inställningar"
+SETTINGS_EVENT_CHANNEL_LABEL: Final[str] = "Eventkanal (RSVP-inlägg)"
+SETTINGS_EVENT_CHANNEL_PLACEHOLDER: Final[str] = "Välj textkanal för RSVP"
+SETTINGS_ANNOUNCEMENT_CHANNEL_LABEL: Final[str] = "Announce-kanal (rum öppnas)"
+SETTINGS_ANNOUNCEMENT_CHANNEL_PLACEHOLDER: Final[str] = (
+    "Valfritt — samma som RSVP-kanalen om tom"
+)
+SETTINGS_EVENT_ROLE_LABEL: Final[str] = "Eventroll (utöver Hantera server)"
+SETTINGS_EVENT_ROLE_PLACEHOLDER: Final[str] = "Valfritt — lämna tomt för att rensa"
+SETTINGS_SAVE_FAILED_MESSAGE: Final[str] = (
+    "Kunde inte spara inställningarna. Försök igen."
+)
+SETTINGS_SAVED_TEMPLATE: Final[str] = (
+    "Inställningarna sparades.\n"
+    "• Eventkanal: {event_channel}\n"
+    "• Announce-kanal: {announcement_channel}\n"
+    "• Eventroll: {event_role}"
 )
 
 # Admin: force event-option cache rehydrate (no deploy/restart)
@@ -227,12 +271,10 @@ ROOMS_PRUNE_SUCCESS_TEMPLATE: Final[str] = (
     "rsvp_messages={messages_seen}, with_closed={messages_with_closed}, "
     "rooms_removed={rooms_removed}, messages_edited={messages_edited}."
 )
-ROOM_OPENED_WITH_MENTIONS_TEMPLATE: Final[str] = (
-    "Rummet är öppet! {mentions}\n"
-    "{message_link}"
-)
-ROOM_OPENED_NO_MENTIONS_TEMPLATE: Final[str] = (
-    "Rummet är öppet!\n"
-    "{message_link}"
+# {greeting} is "Hej <@…>!" or "Hej!"; optional message is appended by the caller.
+ROOM_OPENED_ANNOUNCE_TEMPLATE: Final[str] = (
+    "{greeting}\n"
+    "\n"
+    "Rummet är öppet: {room_url}"
 )
 

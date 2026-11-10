@@ -14,6 +14,7 @@ import butler.settings_command as settings_command
 from butler.config import load_config
 from butler.constants import PERSISTANCE_PATH
 from butler.design import (
+    BUTLER_GROUP_DESCRIPTION,
     EVENT_CREATE_OPTION_DESCRIPTION,
     EVENT_CREATE_SUBCOMMAND_DESCRIPTION,
     EVENT_GROUP_DESCRIPTION,
@@ -24,6 +25,7 @@ from butler.design import (
     ROOMS_GROUP_DESCRIPTION,
     ROOMS_PRUNE_SUBCOMMAND_DESCRIPTION,
     ROOMS_UPDATE_SUBCOMMAND_DESCRIPTION,
+    SETTINGS_COMMAND_DESCRIPTION,
 )
 from butler.discord_events import BOTC_EDITION_CHOICES
 from butler.discord_helpers import (
@@ -146,47 +148,25 @@ bot.tree.add_command(event_group)
 event = event_group
 
 
-@bot.tree.command(
-    name="seteventchannel",
-    description="Set the default channel for Butler event posts",
+butler_group = app_commands.Group(
+    name="butler",
+    description=BUTLER_GROUP_DESCRIPTION,
+    guild_only=True,
+    default_permissions=discord.Permissions(manage_guild=True),
 )
-@app_commands.guild_only()
-@app_commands.default_permissions(manage_guild=True)
-@app_commands.describe(event_channel="Text channel where Butler should post event updates")
-async def seteventchannel(
-    interaction: discord.Interaction,
-    event_channel: discord.TextChannel,
-) -> None:
-    await settings_command.handle_seteventchannel_command(
+
+
+@butler_group.command(name="settings", description=SETTINGS_COMMAND_DESCRIPTION)
+async def settings(interaction: discord.Interaction) -> None:
+    await settings_command.handle_settings_command(
         interaction=interaction,
-        event_channel=event_channel,
         bot=bot,
         settings_store=SETTINGS_STORE,
         get_bot_member_fn=get_bot_member,
     )
 
 
-@bot.tree.command(
-    name="seteventrole",
-    description="Set role allowed to create events and open/close rooms",
-)
-@app_commands.guild_only()
-@app_commands.default_permissions(manage_guild=True)
-@app_commands.describe(
-    role=(
-        "Role allowed to create events and open/close rooms. "
-        "Leave empty to clear."
-    )
-)
-async def seteventrole(
-    interaction: discord.Interaction,
-    role: discord.Role | None = None,
-) -> None:
-    await settings_command.handle_seteventrole_command(
-        interaction=interaction,
-        role=role,
-        settings_store=SETTINGS_STORE,
-    )
+bot.tree.add_command(butler_group)
 
 
 @bot.tree.command(

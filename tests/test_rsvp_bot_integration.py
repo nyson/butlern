@@ -336,3 +336,11 @@ async def test_resolve_active_view_rehydrates_and_cleans_missing(
     )
     assert missing is None
     assert store.get_message(88) is None
+
+
+def test_settings_is_butler_subcommand() -> None:
+    names = {cmd.name for cmd in app.bot.tree.get_commands()}
+    assert "settings" not in names
+    butler_group = next(cmd for cmd in app.bot.tree.get_commands() if cmd.name == "butler")
+    assert isinstance(butler_group, app_commands.Group)
+    assert {cmd.name for cmd in butler_group.commands} == {"settings"}

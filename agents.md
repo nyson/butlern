@@ -21,8 +21,8 @@
   - Presentation constants and message template strings.
 - `butler/event_logic.py`
   - Event input normalization/validation (times, room URL, defaults).
-- `butler/permissions.py`, `butler/discord_helpers.py`, `butler/settings_store.py`
-  - Permission abstraction, Discord fetch helpers, and persisted guild config.
+- `butler/permissions.py`, `butler/discord_helpers.py`, `butler/settings_store.py`, `butler/settings_command.py`, `butler/settings_modal.py`
+  - Permission abstraction, Discord fetch helpers, and centralized `/butler settings` guild config (event channel, announcement channel, event-manager role).
 
 ### Runtime state model
 - `ACTIVE_RSVP_VIEWS` in `butler/app.py` maps `message_id -> AvailabilityView`.

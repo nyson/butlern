@@ -190,8 +190,9 @@ def format_room_section(rooms: Sequence[RoomEntry]) -> str | None:
 
 def format_room_block(room: RoomEntry) -> str:
     """Markdown block for one room (used inside a LayoutView Section/Container)."""
-    # Heading-sized label; bare URL stays plain so Discord keeps it copyable.
-    lines = [f"### Rumslänk: {room.url}"]
+    # Bare URL on its own line (like the event companion) so Discord keeps it
+    # copyable/unfurled; optional status lines follow.
+    lines = [room.url]
     if room.state == "pending":
         lines.append("Väntar på uppdatering…")
         return "\n".join(lines)

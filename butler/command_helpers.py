@@ -53,6 +53,18 @@ def resolve_configured_event_channel(
     return resolve_text_channel_fn(guild, channel_id)
 
 
+def resolve_configured_announcement_channel(
+    *,
+    settings_store: GuildSettingsStore,
+    guild: discord.Guild,
+    resolve_text_channel_fn: Callable[[discord.Guild, int], discord.TextChannel | None],
+) -> discord.TextChannel | None:
+    channel_id = settings_store.get_event_announcement_channel_id(guild.id)
+    if channel_id is None:
+        return None
+    return resolve_text_channel_fn(guild, channel_id)
+
+
 def missing_permission_details(
     *,
     bot_member: discord.Member,

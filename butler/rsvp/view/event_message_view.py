@@ -17,6 +17,7 @@ from butler.caches.events import (
     resolve_existing_event_for_command,
     schedule_event_cache_retry,
 )
+from butler.command_helpers import resolve_configured_announcement_channel
 from butler.design import (
     ARRIVE_LATER_BUTTON_LABEL,
     ARRIVE_LATER_EMOJI,
@@ -27,6 +28,10 @@ from butler.design import (
     CANT_EMOJI,
     MAYBE_BUTTON_LABEL,
     MAYBE_EMOJI,
+    PLAYER_ROLE_MISSING_MESSAGE,
+    ROOM_ANNOUNCE_BUTTON_EMOJI,
+    ROOM_ANNOUNCE_BUTTON_LABEL,
+    ROOM_ANNOUNCE_ROOM_GONE_MESSAGE,
     ROOM_CLOSE_ALL_BUTTON_EMOJI,
     ROOM_CLOSE_ALL_BUTTON_LABEL,
     ROOM_CLOSE_BUTTON_EMOJI,
@@ -38,6 +43,7 @@ from butler.design import (
     STORYTELLER_EMOJI,
 )
 from butler.discord_events import build_event_url, event_start_unix
+from butler.discord_helpers import resolve_text_channel
 from butler.domains.result import Err, Ok, ServiceError
 from butler.domains.rsvp.domain import (
     RsvpResponse,
@@ -57,7 +63,7 @@ from butler.rsvp.controller import RsvpController
 from butler.rsvp.modals.arrive_later import ArriveLaterModal, parse_arrival_time
 from butler.rsvp.modals.room_link import RoomLinkModal
 from butler.rsvp.modals.select_event import SelectEventModal
-from butler.rsvp.room_announce import announce_room_opening
+from butler.rsvp.room_announce import PingMode, announce_room_opening, find_player_role
 from butler.rsvp.snapshot import RsvpRenderSnapshot
 from butler.rsvp.view.body import build_rsvp_body_item, is_discord_scheduled_event_url
 from butler.rsvp.view.event_card_view import EventCardView
@@ -236,12 +242,31 @@ class DismissRoomSectionButton(ui.Button["EventMessageView"]):
         await self.root.dismiss_room_section(interaction, room_id=self.room_id)
 
 
+class AnnounceRoomButton(ui.Button["EventMessageView"]):
+    """Re-announce one open room (same modal as opening, with the link fixed)."""
+
+    def __init__(self, *, root: EventMessageView, room: RoomEntry) -> None:
+        super().__init__(
+            label=ROOM_ANNOUNCE_BUTTON_LABEL,
+            emoji=ROOM_ANNOUNCE_BUTTON_EMOJI,
+            style=discord.ButtonStyle.primary,
+            custom_id=f"butler:rsvp:announce-room:{room.room_id}",
+        )
+        self.root = root
+        self.room_id = room.room_id
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await self.root.open_announce_room_modal(interaction, room_id=self.room_id)
+
+
 class RoomItemActions(ui.ActionRow["EventMessageView"]):
-    """Action row on a room section (Stäng dismisses the section)."""
+    """Action row on a room section (Annonsera for open rooms; Stäng dismisses)."""
 
     def __init__(self, root: EventMessageView, room: RoomEntry) -> None:
         super().__init__()
         self.root = root
+        if room.state == "open":
+            self.add_item(AnnounceRoomButton(root=root, room=room))
         self.add_item(DismissRoomSectionButton(root=root, room=room))
 
 
@@ -600,6 +625,8 @@ class EventMessageView(ui.LayoutView):
         self,
         interaction: discord.Interaction,
         raw_url: str,
+        ping_mode: PingMode = "rsvp",
+        optional_message: str | None = None,
     ) -> None:
         role_id = self.event_manager_role_id(interaction)
         if not can_manage_room_action(interaction, event_manager_role_id=role_id):
@@ -636,13 +663,133 @@ class EventMessageView(ui.LayoutView):
                 await self.apply_and_edit(interaction, snapshot)
                 newly_open = botc is None or botc.occupancy == "open"
                 if newly_open and interaction.message is not None:
-                    await announce_room_opening(
-                        interaction=interaction,
-                        user_ids=self.user_ids_for_statuses(("Available", "Maybe")),
-                        message_link=interaction.message.jump_url,
+                    await self._announce_room(
+                        interaction,
+                        room_url=normalized,
+                        ping_mode=ping_mode,
+                        optional_message=optional_message,
                     )
             case Err(error):
                 await self._reply_service_error(interaction, error, deferred=True)
+
+    def _open_room(self, room_id: str) -> RoomEntry | None:
+        return next(
+            (
+                room
+                for room in _rooms_on_view(self)
+                if room.room_id == room_id and room.state == "open"
+            ),
+            None,
+        )
+
+    async def open_announce_room_modal(
+        self,
+        interaction: discord.Interaction,
+        *,
+        room_id: str,
+    ) -> None:
+        role_id = self.event_manager_role_id(interaction)
+        if not can_manage_room_action(interaction, event_manager_role_id=role_id):
+            await interaction.response.send_message(
+                room_permission_denied_message(interaction, event_manager_role_id=role_id),
+                ephemeral=True,
+            )
+            return
+        room = self._open_room(room_id)
+        if room is None:
+            await interaction.response.send_message(
+                ROOM_ANNOUNCE_ROOM_GONE_MESSAGE,
+                ephemeral=True,
+            )
+            return
+
+        async def _submit(
+            submit_interaction: discord.Interaction,
+            _room_url: str,
+            ping_mode: PingMode,
+            optional_message: str | None,
+        ) -> None:
+            await self.submit_room_announce(
+                submit_interaction,
+                room_id=room_id,
+                ping_mode=ping_mode,
+                optional_message=optional_message,
+            )
+
+        await interaction.response.send_modal(
+            RoomLinkModal(
+                on_submit=_submit,
+                fixed_room_url=room.url,
+                default_ping_mode="none",
+            ),
+        )
+
+    async def submit_room_announce(
+        self,
+        interaction: discord.Interaction,
+        *,
+        room_id: str,
+        ping_mode: PingMode,
+        optional_message: str | None = None,
+    ) -> None:
+        """Post a room-open notice for an already-open room (no state change)."""
+        role_id = self.event_manager_role_id(interaction)
+        if not can_manage_room_action(interaction, event_manager_role_id=role_id):
+            await interaction.response.send_message(
+                room_permission_denied_message(interaction, event_manager_role_id=role_id),
+                ephemeral=True,
+            )
+            return
+        # Re-check: the room may have closed while the modal was open.
+        room = self._open_room(room_id)
+        if room is None:
+            await interaction.response.send_message(
+                ROOM_ANNOUNCE_ROOM_GONE_MESSAGE,
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer(thinking=False)
+        await self._announce_room(
+            interaction,
+            room_url=room.url,
+            ping_mode=ping_mode,
+            optional_message=optional_message,
+        )
+
+    async def _announce_room(
+        self,
+        interaction: discord.Interaction,
+        *,
+        room_url: str,
+        ping_mode: PingMode,
+        optional_message: str | None,
+    ) -> None:
+        """Post the room notice in the announce channel with the chosen pings."""
+        guild = interaction.guild
+        announcement_channel = None
+        if guild is not None and self.settings_store is not None:
+            announcement_channel = resolve_configured_announcement_channel(
+                settings_store=self.settings_store,
+                guild=guild,
+                resolve_text_channel_fn=resolve_text_channel,
+            )
+        user_ids: tuple[int, ...] = ()
+        role: discord.Role | None = None
+        if ping_mode == "rsvp":
+            user_ids = tuple(self.user_ids_for_statuses(("Available", "Maybe")))
+        elif ping_mode == "players":
+            role = find_player_role(guild) if guild is not None else None
+            if role is None:
+                with suppress(discord.HTTPException):
+                    await interaction.followup.send(PLAYER_ROLE_MISSING_MESSAGE, ephemeral=True)
+        await announce_room_opening(
+            interaction=interaction,
+            room_url=room_url,
+            user_ids=user_ids,
+            role=role,
+            optional_message=optional_message,
+            announcement_channel=announcement_channel,
+        )
 
     async def dismiss_room_section(
         self,

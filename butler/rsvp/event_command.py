@@ -403,7 +403,7 @@ async def _prepare_event_command(
     )
     if event_channel is None:
         await interaction.followup.send(
-            "No valid default event channel is set. Run `/seteventchannel` first.",
+            "No valid default event channel is set. Run `/butler settings` first.",
             ephemeral=True,
         )
         return None

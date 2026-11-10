@@ -46,7 +46,7 @@ flowchart LR
 
 ## Module responsibilities
 - `butler/app.py`
-  - Discord command handlers and event handlers (`/event`, `/seteventchannel`, `/seteventrole`, reaction add/remove, startup hydration).
+  - Discord command handlers and event handlers (`/event`, `/butler settings`, reaction add/remove, startup hydration).
   - Wires stores, views, permission checks, and event creation flow.
 - `butler/rsvp/rsvp_view.py`
   - `discord.ui.View` implementation for RSVP buttons/modals.
@@ -58,7 +58,7 @@ flowchart LR
 - `butler/rsvp/rsvp_store.py`
   - SQLite-backed persistence for RSVP message metadata (`rsvp_message`) and user responses (`rsvp_response`).
 - `butler/settings_store.py`
-  - SQLite-backed guild settings (default event channel and optional event-manager role).
+  - SQLite-backed guild settings (event channel, optional announcement channel, optional event-manager role).
 - `butler/event_logic.py`
   - Normalizes and validates event inputs (time parsing, room URL validation, defaults).
 - `butler/permissions.py`
@@ -98,7 +98,8 @@ No privileged intents are required for the current slash-command/button/reaction
 ## Persistence model
 All persistent state is stored in SQLite (`butler_state.db` by default, configurable via `BUTLER_DB_PATH`):
 - guild settings (`guild_settings`)
-  - default event channel id
+  - default event channel id (RSVP posts)
+  - optional announcement channel id (room-open pings)
   - event-manager role id
 - RSVP message metadata (`rsvp_message`)
 - RSVP user responses (`rsvp_response`)
@@ -106,10 +107,8 @@ All persistent state is stored in SQLite (`butler_state.db` by default, configur
 On startup, Butler hydrates persistent RSVP views and removes stale rows that reference deleted/missing Discord messages.
 
 ## Command reference
-- `/seteventchannel event_channel:<#channel>`
-  - Sets default channel for event and RSVP posts.
-- `/seteventrole role:<@role|empty>`
-  - Sets/clears role allowed to create events and open/close rooms (in addition to `Manage Server`).
+- `/butler settings`
+  - Opens a modal to set event channel (RSVP posts), optional announcement channel (room-open pings), and optional event-manager role.
 - `/event`
   - Args:
     - `title` (required)

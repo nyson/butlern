@@ -40,9 +40,13 @@ from tests.discord_mocks import (
 @pytest.fixture(autouse=True)
 def store() -> Iterator[MagicMock]:
     """Patch the module-level settings store with a mock and yield it."""
+    from butler.settings_store import GuildSettings
+
     mock = MagicMock()
     mock.get_event_manager_role_id.return_value = None
     mock.get_default_event_channel_id.return_value = 10
+    mock.get_event_announcement_channel_id.return_value = None
+    mock.get_settings.return_value = GuildSettings(event_channel_id=10)
     rsvp_store_mock = MagicMock()
     rsvp_store_mock.get_message.return_value = None
     rsvp_store_mock.list_messages.return_value = []
@@ -96,87 +100,178 @@ def _reusable_today_event(*, event_id: int, name: str) -> discord.ScheduledEvent
     )
 
 
-# --- /seteventchannel -------------------------------------------------------
+# --- /butler settings --------------------------------------------------------------
 
 
-async def test_seteventchannel_requires_guild() -> None:
+def _patch_guild_channels(
+    guild: discord.Guild,
+    channels_by_id: dict[int, discord.TextChannel],
+) -> None:
+    def _get_channel(channel_id: int) -> discord.TextChannel | None:
+        return channels_by_id.get(channel_id)
+
+    cast(Any, guild).get_channel = MagicMock(side_effect=_get_channel)
+
+
+async def test_settings_requires_guild(store: MagicMock) -> None:
+    from butler.settings_store import GuildSettings
+
+    store.get_settings.return_value = GuildSettings()
     ix = make_interaction(guild=None)
-    await invoke(app.seteventchannel, ix.interaction, make_text_channel())
+    await invoke(app.settings, ix.interaction)
     assert "must be used in a server" in sent_text(ix.response.send_message)
 
 
-async def test_seteventchannel_rejects_cross_guild_channel() -> None:
+async def test_settings_opens_modal(store: MagicMock) -> None:
+    from butler.settings_modal import GuildSettingsModal
+    from butler.settings_store import GuildSettings
+
+    store.get_settings.return_value = GuildSettings(event_channel_id=10)
     ix = make_interaction(guild=make_guild(guild_id=1))
-    foreign_channel = make_text_channel(guild_id=2)
-    await invoke(app.seteventchannel, ix.interaction, foreign_channel)
-    assert "from this server" in sent_text(ix.response.send_message)
+    await invoke(app.settings, ix.interaction)
+    ix.response.send_modal.assert_awaited_once()
+    assert ix.response.send_modal.await_args is not None
+    modal = ix.response.send_modal.await_args.args[0]
+    assert isinstance(modal, GuildSettingsModal)
 
 
-async def test_seteventchannel_missing_bot_member(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(app, "get_bot_member", lambda guild, user: None)  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
-    ix = make_interaction(guild=make_guild(guild_id=1))
-    await invoke(app.seteventchannel, ix.interaction, make_text_channel(guild_id=1))
+async def test_settings_modal_submit_success(
+    store: MagicMock,
+    bot_member_ok: None,
+) -> None:
+    import butler.settings_command as settings_command
+    from butler.settings_store import GuildSettings
+
+    event_channel = make_text_channel(channel_id=77, guild_id=1)
+    announce_channel = make_text_channel(channel_id=88, guild_id=1)
+    role = make_role(role_id=5)
+    guild = make_guild(guild_id=1, channel=event_channel, role=role)
+    _patch_guild_channels(
+        guild,
+        {
+            77: event_channel,
+            88: announce_channel,
+        },
+    )
+    ix = make_interaction(guild=guild)
+    await settings_command.handle_settings_modal_submit(
+        interaction=ix.interaction,
+        settings=GuildSettings(
+            event_channel_id=77,
+            event_announcement_channel_id=88,
+            event_manager_role_id=5,
+        ),
+        bot=app.bot,
+        settings_store=store,
+        get_bot_member_fn=lambda _g, _u: make_member(member_id=2),
+    )
+    store.save_settings.assert_called_once_with(
+        1,
+        GuildSettings(
+            event_channel_id=77,
+            event_announcement_channel_id=88,
+            event_manager_role_id=5,
+        ),
+    )
+    text_out = sent_text(ix.response.send_message)
+    assert "Inställningarna sparades" in text_out
+    assert "#77" in text_out
+    assert "#88" in text_out
+
+
+async def test_settings_modal_submit_missing_bot_member(store: MagicMock) -> None:
+    import butler.settings_command as settings_command
+    from butler.settings_store import GuildSettings
+
+    channel = make_text_channel(channel_id=77, guild_id=1)
+    guild = make_guild(guild_id=1, channel=channel)
+    _patch_guild_channels(guild, {77: channel})
+    ix = make_interaction(guild=guild)
+    await settings_command.handle_settings_modal_submit(
+        interaction=ix.interaction,
+        settings=GuildSettings(event_channel_id=77),
+        bot=app.bot,
+        settings_store=store,
+        get_bot_member_fn=lambda _g, _u: None,
+    )
     assert "couldn't verify my server permissions" in sent_text(ix.response.send_message)
 
 
-async def test_seteventchannel_missing_post_permissions(bot_member_ok: None) -> None:
-    ix = make_interaction(guild=make_guild(guild_id=1))
-    channel = make_text_channel(guild_id=1, permissions=make_permissions(send_messages=False))
-    await invoke(app.seteventchannel, ix.interaction, channel)
+async def test_settings_modal_submit_missing_post_permissions(
+    store: MagicMock,
+    bot_member_ok: None,
+) -> None:
+    import butler.settings_command as settings_command
+    from butler.settings_store import GuildSettings
+
+    channel = make_text_channel(
+        channel_id=77,
+        guild_id=1,
+        permissions=make_permissions(send_messages=False),
+    )
+    guild = make_guild(guild_id=1, channel=channel)
+    _patch_guild_channels(guild, {77: channel})
+    ix = make_interaction(guild=guild)
+    await settings_command.handle_settings_modal_submit(
+        interaction=ix.interaction,
+        settings=GuildSettings(event_channel_id=77),
+        bot=app.bot,
+        settings_store=store,
+        get_bot_member_fn=lambda _g, _u: make_member(member_id=2),
+    )
     assert "Missing permissions" in sent_text(ix.response.send_message)
 
 
-async def test_seteventchannel_save_failure(store: MagicMock, bot_member_ok: None) -> None:
-    store.set_default_event_channel_id.side_effect = OSError("disk")
-    ix = make_interaction(guild=make_guild(guild_id=1))
-    await invoke(app.seteventchannel, ix.interaction, make_text_channel(guild_id=1))
-    assert "Failed to save" in sent_text(ix.response.send_message)
+async def test_settings_modal_submit_save_failure(
+    store: MagicMock,
+    bot_member_ok: None,
+) -> None:
+    import butler.settings_command as settings_command
+    from butler.settings_store import GuildSettings
 
-
-async def test_seteventchannel_success(store: MagicMock, bot_member_ok: None) -> None:
-    ix = make_interaction(guild=make_guild(guild_id=1))
     channel = make_text_channel(channel_id=77, guild_id=1)
-    await invoke(app.seteventchannel, ix.interaction, channel)
-    store.set_default_event_channel_id.assert_called_once_with(1, 77)
-    assert "Default event channel set" in sent_text(ix.response.send_message)
+    guild = make_guild(guild_id=1, channel=channel)
+    _patch_guild_channels(guild, {77: channel})
+    store.save_settings.side_effect = OSError("disk")
+    ix = make_interaction(guild=guild)
+    await settings_command.handle_settings_modal_submit(
+        interaction=ix.interaction,
+        settings=GuildSettings(event_channel_id=77),
+        bot=app.bot,
+        settings_store=store,
+        get_bot_member_fn=lambda _g, _u: make_member(member_id=2),
+    )
+    assert "Kunde inte spara" in sent_text(ix.response.send_message)
 
 
-# --- /seteventrole ----------------------------------------------------------
+async def test_settings_modal_submit_clears_optional_fields(
+    store: MagicMock,
+    bot_member_ok: None,
+) -> None:
+    import butler.settings_command as settings_command
+    from butler.settings_store import GuildSettings
 
-
-async def test_seteventrole_requires_guild() -> None:
-    ix = make_interaction(guild=None)
-    await invoke(app.seteventrole, ix.interaction, make_role(role_id=5))
-    assert "must be used in a server" in sent_text(ix.response.send_message)
-
-
-async def test_seteventrole_rejects_cross_guild_role() -> None:
-    ix = make_interaction(guild=make_guild(guild_id=1))
-    role = make_role(role_id=5)
-    role.guild.id = 2
-    await invoke(app.seteventrole, ix.interaction, role)
-    assert "from this server" in sent_text(ix.response.send_message)
-
-
-async def test_seteventrole_set_success(store: MagicMock) -> None:
-    ix = make_interaction(guild=make_guild(guild_id=1))
-    await invoke(app.seteventrole, ix.interaction, make_role(role_id=5))
-    store.set_event_manager_role_id.assert_called_once_with(1, 5)
-    assert "can now create events" in sent_text(ix.response.send_message)
-
-
-async def test_seteventrole_clear_success(store: MagicMock) -> None:
-    ix = make_interaction(guild=make_guild(guild_id=1))
-    await invoke(app.seteventrole, ix.interaction, None)
-    store.clear_event_manager_role_id.assert_called_once_with(1)
-    assert "Cleared the event manager role" in sent_text(ix.response.send_message)
-
-
-async def test_seteventrole_save_failure(store: MagicMock) -> None:
-    store.set_event_manager_role_id.side_effect = OSError("disk")
-    ix = make_interaction(guild=make_guild(guild_id=1))
-    await invoke(app.seteventrole, ix.interaction, make_role(role_id=5))
-    assert "Failed to save" in sent_text(ix.response.send_message)
+    channel = make_text_channel(channel_id=77, guild_id=1)
+    guild = make_guild(guild_id=1, channel=channel)
+    _patch_guild_channels(guild, {77: channel})
+    ix = make_interaction(guild=guild)
+    await settings_command.handle_settings_modal_submit(
+        interaction=ix.interaction,
+        settings=GuildSettings(event_channel_id=77),
+        bot=app.bot,
+        settings_store=store,
+        get_bot_member_fn=lambda _g, _u: make_member(member_id=2),
+    )
+    store.save_settings.assert_called_once_with(
+        1,
+        GuildSettings(
+            event_channel_id=77,
+            event_announcement_channel_id=None,
+            event_manager_role_id=None,
+        ),
+    )
+    text_out = sent_text(ix.response.send_message)
+    assert "same as the RSVP message channel" in text_out
 
 
 # --- /rehydrate --------------------------------------------------------------

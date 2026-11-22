@@ -7,7 +7,7 @@ from dataclasses import dataclass, replace
 from typing import Final
 from uuid import uuid4
 
-from butler.design import STORYTELLER_EMOJI
+from butler.design import ROOM_LINK_LINE_TEMPLATE, STORYTELLER_EMOJI
 from butler.domains.rsvp.types import (
     ROOM_CLOSED_PRUNE_SECONDS,
     RoomButton,
@@ -190,9 +190,9 @@ def format_room_section(rooms: Sequence[RoomEntry]) -> str | None:
 
 def format_room_block(room: RoomEntry) -> str:
     """Markdown block for one room (used inside a LayoutView Section/Container)."""
-    # Bare URL on its own line (like the event companion) so Discord keeps it
-    # copyable/unfurled; optional status lines follow.
-    lines = [room.url]
+    # URL on its own heading line so Discord renders it large but keeps it
+    # clickable/copyable; optional status lines follow.
+    lines = [ROOM_LINK_LINE_TEMPLATE.format(room_url=room.url)]
     if room.state == "pending":
         lines.append("Väntar på uppdatering…")
         return "\n".join(lines)

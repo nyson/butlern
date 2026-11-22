@@ -401,7 +401,7 @@ async def test_render_room_open_line(
     new_state, snap = result.value
     assert snap.view_state.rooms
     content = format_room_block(new_state.rooms[0])
-    assert "https://example.com/room" in content
+    assert content.splitlines()[0] == "## Rum: https://example.com/room"
     view = EventMessageView(view_state=new_state, controller=controller)
     # body + 1 room container + status + meta + ST RoomActions
     assert len(view.children) == 5

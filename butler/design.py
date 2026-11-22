@@ -101,6 +101,8 @@ EVENT_POST_TEMPLATE: Final[str] = (
     "{status_sections}"
 )
 ROOM_OPENED_MESSAGE_TEMPLATE: Final[str] = "**Rummet är öppet:** {room_url}"
+# Room link line in each RSVP room Container; heading markdown renders it larger.
+ROOM_LINK_LINE_TEMPLATE: Final[str] = "## Rum: {room_url}"
 ROOM_CLOSED_MESSAGE: Final[str] = "**Rummet är nu stängt!** Tack för ikväll!"
 
 ARRIVE_LATER_MODAL_TITLE: Final[str] = "Jag kommer senare"
